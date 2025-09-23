@@ -109,6 +109,146 @@ app.delete('/api/auth/cache', async (req, res) => {
   }
 });
 
+// ==================== COMPREHENSIVE MONITORING ENDPOINTS ====================
+
+/**
+ * @route   GET /api/monitorUser/:userId
+ * @desc    COMPREHENSIVE USER MONITORING - Get complete monitoring data for a user
+ * @param   userId - User ID to monitor
+ * @query   from, to - Date range (YYYY-MM-DD)
+ * 
+ * **LEGAL WARNING**: Ensure you have proper employee consent and legal compliance before using this endpoint.
+ * This endpoint collects comprehensive monitoring data including:
+ * - Time tracking and activity logs
+ * - Screenshots (if enabled)
+ * - Productivity statistics
+ * - Computer/device information
+ * - Disconnection events
+ * - Application usage patterns
+ */
+app.get('/api/monitorUser/:userId', async (req, res) => {
+  try {
+    const userId = req.params.userId;
+    
+    // Ensure we have a valid user ID
+    if (!userId || userId === 'undefined') {
+      return res.status(400).json({
+        success: false,
+        error: 'User ID is required'
+      });
+    }
+
+    console.log(`🕵️ COMPREHENSIVE MONITORING requested for user: ${userId}`);
+    console.log(`📅 Date range: ${req.query.from || 'last 7 days'} to ${req.query.to || 'today'}`);
+    console.log(`⚖️ LEGAL NOTICE: Ensure proper employee consent and legal compliance`);
+    
+    const monitoringData = await api.getCompleteUserMonitoring(userId, req.query);
+    
+    res.json({
+      success: true,
+      message: `Complete monitoring data for user ${userId}`,
+      legalNotice: "Ensure proper employee consent and legal compliance before using monitoring data",
+      data: monitoringData
+    });
+  } catch (error) {
+    console.error(`❌ Monitoring error for user ${req.params.userId}:`, error.message);
+    res.status(500).json({
+      success: false,
+      error: error.message,
+      message: 'Failed to retrieve monitoring data'
+    });
+  }
+});
+
+/**
+ * @route   GET /api/monitorAllUsers
+ * @desc    MONITOR ALL USERS - Get comprehensive monitoring data for all users in company
+ * @query   from, to - Date range (YYYY-MM-DD)
+ * 
+ * **LEGAL WARNING**: Ensure you have proper consent from ALL employees and legal compliance.
+ * This endpoint monitors ALL users and collects comprehensive data for each employee.
+ */
+app.get('/api/monitorAllUsers', async (req, res) => {
+  try {
+    console.log('👥🕵️ COMPREHENSIVE MONITORING requested for ALL USERS');
+    console.log(`📅 Date range: ${req.query.from || 'last 7 days'} to ${req.query.to || 'today'}`);
+    console.log('⚖️ LEGAL NOTICE: Ensure proper consent from ALL employees and legal compliance');
+    
+    const allMonitoringData = await api.getAllUsersMonitoring(req.query);
+    
+    res.json({
+      success: true,
+      message: 'Complete monitoring data for all users',
+      legalNotice: "Ensure proper consent from ALL employees and legal compliance before using monitoring data",
+      ...allMonitoringData
+    });
+  } catch (error) {
+    console.error('❌ Error monitoring all users:', error.message);
+    res.status(500).json({
+      success: false,
+      error: error.message,
+      message: 'Failed to retrieve monitoring data for all users'
+    });
+  }
+});
+
+/**
+ * @route   GET /api/userActivitySummary/:userId
+ * @desc    Get simplified activity summary for a user (less invasive than full monitoring)
+ * @param   userId - User ID
+ * @query   from, to - Date range
+ */
+app.get('/api/userActivitySummary/:userId', async (req, res) => {
+  try {
+    const userId = req.params.userId;
+    
+    if (!userId || userId === 'undefined') {
+      return res.status(400).json({
+        success: false,
+        error: 'User ID is required'
+      });
+    }
+
+    console.log(`📊 Activity summary requested for user: ${userId}`);
+    
+    // Get basic activity data (less invasive than full monitoring)
+    const [activityWorklog, timeUseStats] = await Promise.allSettled([
+      api.getActivityWorklog({ ...req.query, user: userId }),
+      api.timeuseStats({ ...req.query, user: userId })
+    ]);
+
+    const summary = {
+      userId: userId,
+      dateRange: {
+        from: req.query.from || new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+        to: req.query.to || new Date().toISOString().split('T')[0]
+      },
+      activityData: {
+        status: activityWorklog.status === 'fulfilled' ? 'success' : 'error',
+        recordCount: activityWorklog.value?.data?.length || 0,
+        hasData: (activityWorklog.value?.data?.length || 0) > 0
+      },
+      productivityStats: {
+        status: timeUseStats.status === 'fulfilled' ? 'success' : 'error',
+        data: timeUseStats.value || null
+      },
+      generatedAt: new Date().toISOString()
+    };
+    
+    res.json({
+      success: true,
+      message: `Activity summary for user ${userId}`,
+      data: summary
+    });
+  } catch (error) {
+    console.error(`❌ Error getting activity summary for user ${req.params.userId}:`, error.message);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
 // ==================== USER ENDPOINTS ====================
 
 /**
@@ -839,6 +979,11 @@ app.use((req, res) => {
       'POST /api/auth/refresh',
       'DELETE /api/auth/cache',
       
+      // MONITORING ENDPOINTS (NEW)
+      'GET /api/monitorUser/:userId - COMPREHENSIVE USER MONITORING',
+      'GET /api/monitorAllUsers - MONITOR ALL USERS',
+      'GET /api/userActivitySummary/:userId - Simple activity summary',
+      
       // User Endpoints
       'GET /api/getUsers',
       'GET /api/getManagedUsers',
@@ -900,17 +1045,39 @@ app.use((err, req, res, next) => {
 // ==================== START SERVER ====================
 
 app.listen(PORT, () => {
-  console.log('\n🚀 TimeDoctor API Server');
-  console.log('========================');
+  console.log('\n🚀 TimeDoctor API Server with COMPREHENSIVE MONITORING');
+  console.log('=======================================================');
   console.log(`📡 Server running on: http://localhost:${PORT}`);
   console.log(`📧 Email: ${config.credentials.email}`);
   console.log(`🏢 Company: ${config.credentials.companyName}`);
+  console.log('\n⚖️ LEGAL NOTICE: EMPLOYEE MONITORING COMPLIANCE');
+  console.log('================================================');
+  console.log('⚠️ WARNING: Before using monitoring endpoints, ensure:');
+  console.log('  ✓ Written employee consent obtained');
+  console.log('  ✓ Local labor laws compliance verified');
+  console.log('  ✓ Clear monitoring policies established');
+  console.log('  ✓ Data security measures implemented');
+  console.log('  ✓ Business justification documented');
   console.log('\n✨ Features:');
   console.log('  ✅ Automatic token refresh when expired');
   console.log('  ✅ Token caching for better performance');
   console.log('  ✅ Auto-retry on authentication failures');
   console.log('  ✅ Complete TimeDoctor API coverage');
-  console.log('\n📚 Available endpoints:');
+  console.log('  🕵️ COMPREHENSIVE USER MONITORING');
+  console.log('  📊 Activity tracking and screenshots');
+  console.log('  💻 Computer/device information');
+  console.log('  📈 Productivity analytics');
+  console.log('\n📚 NEW MONITORING ENDPOINTS:');
+  console.log('  🔍 GET  /api/monitorUser/:userId');
+  console.log('      - Complete monitoring data for specific user');
+  console.log('      - Time tracking, screenshots, productivity stats');
+  console.log('      - Computer info, disconnection events');
+  console.log('  👥 GET  /api/monitorAllUsers');
+  console.log('      - Monitor ALL users in the company');
+  console.log('      - Comprehensive data for every employee');
+  console.log('  📊 GET  /api/userActivitySummary/:userId');
+  console.log('      - Simplified activity summary (less invasive)');
+  console.log('\n📚 Standard endpoints:');
   console.log('  - GET  /api/health');
   console.log('  - GET  /api/auth/status (check token validity)');
   console.log('  - POST /api/auth/refresh (force new token)');
@@ -943,7 +1110,8 @@ app.listen(PORT, () => {
   console.log('    - GET  /api/getScreenshots');
   console.log('    - GET  /api/getTimeTracking');
   console.log('\n✅ Server is ready to accept requests!');
-  console.log('🔄 Tokens will automatically refresh when expired\n');
+  console.log('🔄 Tokens will automatically refresh when expired');
+  console.log('🕵️ MONITORING: Use responsibly and legally!\n');
 });
 
 module.exports = app;
