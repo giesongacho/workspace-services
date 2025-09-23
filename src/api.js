@@ -165,7 +165,253 @@ class TimeDoctorAPI {
     return companyId;
   }
 
-  // ==================== USER ENDPOINTS ====================
+  // ==================== COMPREHENSIVE USER MONITORING ====================
+
+  /**
+   * COMPREHENSIVE USER MONITORING API
+   * Get complete monitoring data for a user including:
+   * - Activity worklog (time tracking)
+   * - Screenshots
+   * - Time usage statistics
+   * - Productivity metrics
+   * - Computer/device information
+   * - Disconnection events
+   * - Application usage
+   * 
+   * @param {string} userId - User ID to monitor
+   * @param {object} params - Parameters including from/to dates
+   * @returns {object} Complete monitoring data
+   */
+  async getCompleteUserMonitoring(userId, params = {}) {
+    console.log(`🕵️ Fetching COMPLETE monitoring data for user ${userId}...`);
+    
+    const companyId = await this.getCompanyId();
+    
+    // Default to last 7 days if no dates provided
+    const defaultParams = {
+      from: params.from || new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+      to: params.to || new Date().toISOString().split('T')[0],
+      user: userId,
+      company: companyId,
+      limit: '1000'
+    };
+
+    const queryParams = { ...defaultParams, ...params };
+    
+    try {
+      console.log(`📊 Gathering monitoring data from ${queryParams.from} to ${queryParams.to}...`);
+      
+      // Fetch all monitoring data in parallel for efficiency
+      const [
+        activityWorklog,
+        screenshots,
+        timeUseData,
+        timeUseStats,
+        disconnectivity,
+        totalStats
+      ] = await Promise.allSettled([
+        // Activity and time tracking
+        this.getActivityWorklog(queryParams).catch(err => ({ error: err.message, data: [] })),
+        
+        // Screenshots for visual monitoring
+        this.getScreenshots(queryParams).catch(err => ({ error: err.message, data: [] })),
+        
+        // Time usage patterns
+        this.getActivityTimeuse(queryParams).catch(err => ({ error: err.message, data: [] })),
+        
+        // Productivity statistics
+        this.timeuseStats(queryParams).catch(err => ({ error: err.message, data: null })),
+        
+        // Disconnection/idle time monitoring
+        this.getDisconnectivity(queryParams).catch(err => ({ error: err.message, data: [] })),
+        
+        // Overall statistics
+        this.stats1_total(queryParams).catch(err => ({ error: err.message, data: null }))
+      ]);
+
+      // Get user information
+      let userInfo = null;
+      try {
+        const users = await this.getUsers({ limit: 1000 });
+        userInfo = users.data?.find(u => u.id === userId) || null;
+      } catch (err) {
+        console.warn('Could not fetch user info:', err.message);
+      }
+
+      // Process and format the results
+      const monitoringData = {
+        userId: userId,
+        companyId: companyId,
+        dateRange: {
+          from: queryParams.from,
+          to: queryParams.to
+        },
+        userInfo: userInfo ? {
+          id: userInfo.id,
+          name: userInfo.name || 'Unknown',
+          email: userInfo.email || 'Unknown',
+          timezone: userInfo.timezone || 'Unknown',
+          lastSeenGlobal: userInfo.lastSeenGlobal || null,
+          isInteractiveAutoTracking: userInfo.isInteractiveAutoTracking || false,
+          hasPassword: userInfo.hasPassword || false
+        } : null,
+        
+        // Activity and Time Tracking
+        activitySummary: {
+          status: activityWorklog.status === 'fulfilled' ? 'success' : 'error',
+          error: activityWorklog.status === 'rejected' ? activityWorklog.reason?.message : null,
+          totalRecords: activityWorklog.value?.data?.length || 0,
+          data: activityWorklog.value?.data || []
+        },
+        
+        // Screenshots for monitoring
+        screenshots: {
+          status: screenshots.status === 'fulfilled' ? 'success' : 'error',
+          error: screenshots.status === 'rejected' ? screenshots.reason?.message : null,
+          totalScreenshots: screenshots.value?.data?.length || 0,
+          data: screenshots.value?.data || []
+        },
+        
+        // Time usage patterns
+        timeUsage: {
+          status: timeUseData.status === 'fulfilled' ? 'success' : 'error',
+          error: timeUseData.status === 'rejected' ? timeUseData.reason?.message : null,
+          totalRecords: timeUseData.value?.data?.length || 0,
+          data: timeUseData.value?.data || []
+        },
+        
+        // Productivity metrics
+        productivityStats: {
+          status: timeUseStats.status === 'fulfilled' ? 'success' : 'error',
+          error: timeUseStats.status === 'rejected' ? timeUseStats.reason?.message : null,
+          data: timeUseStats.value?.data || null
+        },
+        
+        // Disconnection monitoring
+        disconnectionEvents: {
+          status: disconnectivity.status === 'fulfilled' ? 'success' : 'error',
+          error: disconnectivity.status === 'rejected' ? disconnectivity.reason?.message : null,
+          totalEvents: disconnectivity.value?.data?.length || 0,
+          data: disconnectivity.value?.data || []
+        },
+        
+        // Overall statistics
+        overallStats: {
+          status: totalStats.status === 'fulfilled' ? 'success' : 'error',
+          error: totalStats.status === 'rejected' ? totalStats.reason?.message : null,
+          data: totalStats.value?.data || null
+        },
+        
+        // Summary metrics
+        summary: {
+          hasData: false,
+          totalActiveTime: 0,
+          totalScreenshots: screenshots.value?.data?.length || 0,
+          totalDisconnections: disconnectivity.value?.data?.length || 0,
+          monitoringPeriod: `${queryParams.from} to ${queryParams.to}`,
+          dataCollectedAt: new Date().toISOString()
+        }
+      };
+
+      // Calculate if we have any monitoring data
+      monitoringData.summary.hasData = 
+        monitoringData.activitySummary.totalRecords > 0 ||
+        monitoringData.screenshots.totalScreenshots > 0 ||
+        monitoringData.timeUsage.totalRecords > 0 ||
+        monitoringData.disconnectionEvents.totalEvents > 0;
+
+      console.log(`✅ Complete monitoring data retrieved for user ${userId}`);
+      console.log(`   📊 Activity records: ${monitoringData.activitySummary.totalRecords}`);
+      console.log(`   📸 Screenshots: ${monitoringData.screenshots.totalScreenshots}`);
+      console.log(`   🕐 Time usage records: ${monitoringData.timeUsage.totalRecords}`);
+      console.log(`   🔌 Disconnection events: ${monitoringData.disconnectionEvents.totalEvents}`);
+      console.log(`   📈 Has monitoring data: ${monitoringData.summary.hasData}`);
+
+      return monitoringData;
+
+    } catch (error) {
+      console.error(`❌ Error fetching monitoring data for user ${userId}:`, error.message);
+      throw new Error(`Failed to fetch monitoring data: ${error.message}`);
+    }
+  }
+
+  /**
+   * MONITOR ALL USERS - Get monitoring data for all users in the company
+   * @param {object} params - Parameters including from/to dates
+   * @returns {object} Monitoring data for all users
+   */
+  async getAllUsersMonitoring(params = {}) {
+    console.log('👥🕵️ Fetching monitoring data for ALL users...');
+    
+    try {
+      // First get all users
+      const users = await this.getUsers({ limit: 1000 });
+      const userList = users.data || [];
+      
+      if (userList.length === 0) {
+        return {
+          success: false,
+          message: 'No users found in company',
+          data: []
+        };
+      }
+
+      console.log(`📊 Found ${userList.length} users to monitor`);
+      
+      // Monitor each user (sequential to avoid overwhelming the API)
+      const allMonitoringData = [];
+      
+      for (const user of userList) {
+        console.log(`🔍 Monitoring user: ${user.name || user.id}`);
+        try {
+          const userMonitoring = await this.getCompleteUserMonitoring(user.id, params);
+          allMonitoringData.push(userMonitoring);
+          
+          // Small delay to avoid overwhelming the API
+          await new Promise(resolve => setTimeout(resolve, 100));
+          
+        } catch (error) {
+          console.warn(`⚠️ Failed to monitor user ${user.id}: ${error.message}`);
+          allMonitoringData.push({
+            userId: user.id,
+            error: error.message,
+            userInfo: user,
+            summary: { hasData: false }
+          });
+        }
+      }
+
+      // Calculate overall summary
+      const totalWithData = allMonitoringData.filter(u => u.summary?.hasData).length;
+      const totalScreenshots = allMonitoringData.reduce((sum, u) => sum + (u.screenshots?.totalScreenshots || 0), 0);
+      const totalActivityRecords = allMonitoringData.reduce((sum, u) => sum + (u.activitySummary?.totalRecords || 0), 0);
+
+      console.log(`✅ Monitoring complete for all users`);
+      console.log(`   👥 Total users monitored: ${allMonitoringData.length}`);
+      console.log(`   📊 Users with data: ${totalWithData}`);
+      console.log(`   📸 Total screenshots: ${totalScreenshots}`);
+      console.log(`   📈 Total activity records: ${totalActivityRecords}`);
+
+      return {
+        success: true,
+        summary: {
+          totalUsers: allMonitoringData.length,
+          usersWithData: totalWithData,
+          totalScreenshots: totalScreenshots,
+          totalActivityRecords: totalActivityRecords,
+          monitoringPeriod: `${params.from || 'last 7 days'} to ${params.to || 'today'}`,
+          generatedAt: new Date().toISOString()
+        },
+        data: allMonitoringData
+      };
+
+    } catch (error) {
+      console.error('❌ Error monitoring all users:', error.message);
+      throw new Error(`Failed to monitor all users: ${error.message}`);
+    }
+  }
+
+  // ==================== EXISTING METHODS (keeping all previous methods) ====================
 
   /**
    * Get ALL users using the correct endpoint
