@@ -116,6 +116,7 @@ app.delete('/api/auth/cache', async (req, res) => {
  * @desc    COMPREHENSIVE USER MONITORING - Get complete monitoring data for a user
  * @param   userId - User ID to monitor
  * @query   from, to - Date range (YYYY-MM-DD)
+ * @query   includeScreenshots - Include actual screenshot images (true/false)
  * 
  * **LEGAL WARNING**: Ensure you have proper employee consent and legal compliance before using this endpoint.
  * This endpoint collects comprehensive monitoring data including:
@@ -129,6 +130,7 @@ app.delete('/api/auth/cache', async (req, res) => {
 app.get('/api/monitorUser/:userId', async (req, res) => {
   try {
     const userId = req.params.userId;
+    const includeScreenshots = req.query.includeScreenshots === 'true';
     
     // Ensure we have a valid user ID
     if (!userId || userId === 'undefined') {
@@ -140,14 +142,19 @@ app.get('/api/monitorUser/:userId', async (req, res) => {
 
     console.log(`🕵️ COMPREHENSIVE MONITORING requested for user: ${userId}`);
     console.log(`📅 Date range: ${req.query.from || 'last 7 days'} to ${req.query.to || 'today'}`);
+    console.log(`📸 Include screenshots: ${includeScreenshots}`);
     console.log(`⚖️ LEGAL NOTICE: Ensure proper employee consent and legal compliance`);
     
-    const monitoringData = await api.getCompleteUserMonitoring(userId, req.query);
+    const monitoringData = await api.getCompleteUserMonitoring(userId, {
+      ...req.query,
+      includeScreenshotImages: includeScreenshots
+    });
     
     res.json({
       success: true,
       message: `Complete monitoring data for user ${userId}`,
       legalNotice: "Ensure proper employee consent and legal compliance before using monitoring data",
+      privacyWarning: includeScreenshots ? "Screenshots contain sensitive visual data - handle with extreme care" : null,
       data: monitoringData
     });
   } catch (error) {
@@ -164,22 +171,30 @@ app.get('/api/monitorUser/:userId', async (req, res) => {
  * @route   GET /api/monitorAllUsers
  * @desc    MONITOR ALL USERS - Get comprehensive monitoring data for all users in company
  * @query   from, to - Date range (YYYY-MM-DD)
+ * @query   includeScreenshots - Include actual screenshot images (true/false)
  * 
  * **LEGAL WARNING**: Ensure you have proper consent from ALL employees and legal compliance.
  * This endpoint monitors ALL users and collects comprehensive data for each employee.
  */
 app.get('/api/monitorAllUsers', async (req, res) => {
   try {
+    const includeScreenshots = req.query.includeScreenshots === 'true';
+    
     console.log('👥🕵️ COMPREHENSIVE MONITORING requested for ALL USERS');
     console.log(`📅 Date range: ${req.query.from || 'last 7 days'} to ${req.query.to || 'today'}`);
+    console.log(`📸 Include screenshots: ${includeScreenshots}`);
     console.log('⚖️ LEGAL NOTICE: Ensure proper consent from ALL employees and legal compliance');
     
-    const allMonitoringData = await api.getAllUsersMonitoring(req.query);
+    const allMonitoringData = await api.getAllUsersMonitoring({
+      ...req.query,
+      includeScreenshotImages: includeScreenshots
+    });
     
     res.json({
       success: true,
       message: 'Complete monitoring data for all users',
       legalNotice: "Ensure proper consent from ALL employees and legal compliance before using monitoring data",
+      privacyWarning: includeScreenshots ? "Screenshots contain sensitive visual data - handle with extreme care" : null,
       ...allMonitoringData
     });
   } catch (error) {
@@ -188,6 +203,47 @@ app.get('/api/monitorAllUsers', async (req, res) => {
       success: false,
       error: error.message,
       message: 'Failed to retrieve monitoring data for all users'
+    });
+  }
+});
+
+/**
+ * @route   GET /api/getScreenshotsWithImages/:userId
+ * @desc    Get screenshots WITH actual image data for a specific user
+ * @param   userId - User ID
+ * @query   from, to - Date range
+ * 
+ * **EXTREME PRIVACY WARNING**: This endpoint returns actual screenshot images
+ * showing everything on the user's screen. This is highly invasive monitoring.
+ */
+app.get('/api/getScreenshotsWithImages/:userId', async (req, res) => {
+  try {
+    const userId = req.params.userId;
+    
+    if (!userId || userId === 'undefined') {
+      return res.status(400).json({
+        success: false,
+        error: 'User ID is required'
+      });
+    }
+
+    console.log(`📸 SCREENSHOT IMAGES requested for user: ${userId}`);
+    console.log(`⚖️ EXTREME PRIVACY WARNING: Actual screenshot images being retrieved`);
+    
+    const screenshotsWithImages = await api.getScreenshotsWithImages(userId, req.query);
+    
+    res.json({
+      success: true,
+      message: `Screenshot images for user ${userId}`,
+      legalNotice: "EXTREME PRIVACY WARNING: These are actual screenshots of user's screen",
+      privacyWarning: "Handle screenshot images with extreme care - contains sensitive visual data",
+      data: screenshotsWithImages
+    });
+  } catch (error) {
+    console.error(`❌ Error getting screenshots for user ${req.params.userId}:`, error.message);
+    res.status(500).json({
+      success: false,
+      error: error.message
     });
   }
 });
@@ -851,7 +907,7 @@ app.get('/api/getTimeTracking', async (req, res) => {
 
 /**
  * @route   GET /api/getScreenshots
- * @desc    Get screenshots
+ * @desc    Get screenshots (metadata only, no actual images)
  * @query   from, to, user, limit
  */
 app.get('/api/getScreenshots', async (req, res) => {
@@ -980,8 +1036,9 @@ app.use((req, res) => {
       'DELETE /api/auth/cache',
       
       // MONITORING ENDPOINTS (NEW)
-      'GET /api/monitorUser/:userId - COMPREHENSIVE USER MONITORING',
-      'GET /api/monitorAllUsers - MONITOR ALL USERS',
+      'GET /api/monitorUser/:userId?includeScreenshots=true - COMPREHENSIVE USER MONITORING WITH IMAGES',
+      'GET /api/monitorAllUsers?includeScreenshots=true - MONITOR ALL USERS WITH IMAGES',
+      'GET /api/getScreenshotsWithImages/:userId - SCREENSHOT IMAGES ONLY',
       'GET /api/userActivitySummary/:userId - Simple activity summary',
       
       // User Endpoints
@@ -1045,38 +1102,42 @@ app.use((err, req, res, next) => {
 // ==================== START SERVER ====================
 
 app.listen(PORT, () => {
-  console.log('\n🚀 TimeDoctor API Server with COMPREHENSIVE MONITORING');
-  console.log('=======================================================');
+  console.log('\n🚀 TimeDoctor API Server with SCREENSHOT IMAGE MONITORING');
+  console.log('===========================================================');
   console.log(`📡 Server running on: http://localhost:${PORT}`);
   console.log(`📧 Email: ${config.credentials.email}`);
   console.log(`🏢 Company: ${config.credentials.companyName}`);
-  console.log('\n⚖️ LEGAL NOTICE: EMPLOYEE MONITORING COMPLIANCE');
-  console.log('================================================');
-  console.log('⚠️ WARNING: Before using monitoring endpoints, ensure:');
-  console.log('  ✓ Written employee consent obtained');
-  console.log('  ✓ Local labor laws compliance verified');
-  console.log('  ✓ Clear monitoring policies established');
-  console.log('  ✓ Data security measures implemented');
-  console.log('  ✓ Business justification documented');
+  console.log('\n⚖️ CRITICAL LEGAL NOTICE: SCREENSHOT MONITORING COMPLIANCE');
+  console.log('============================================================');
+  console.log('🚨 EXTREME PRIVACY WARNING: Screenshot monitoring is highly invasive');
+  console.log('⚠️ WARNING: Before using screenshot endpoints, ensure:');
+  console.log('  ✓ EXPLICIT written consent for screenshot monitoring obtained');
+  console.log('  ✓ Local privacy laws compliance verified (GDPR, CCPA, etc.)');
+  console.log('  ✓ Screenshot retention and deletion policies established');
+  console.log('  ✓ Secure storage and encryption for screenshot data');
+  console.log('  ✓ Clear business justification documented');
+  console.log('  ✓ Employee access rights to their screenshot data provided');
+  console.log('  ✓ Regular audits of screenshot access and usage');
   console.log('\n✨ Features:');
   console.log('  ✅ Automatic token refresh when expired');
   console.log('  ✅ Token caching for better performance');
   console.log('  ✅ Auto-retry on authentication failures');
   console.log('  ✅ Complete TimeDoctor API coverage');
   console.log('  🕵️ COMPREHENSIVE USER MONITORING');
-  console.log('  📊 Activity tracking and screenshots');
+  console.log('  📸 ACTUAL SCREENSHOT IMAGES (HIGHLY SENSITIVE)');
+  console.log('  📊 Activity tracking and analytics');
   console.log('  💻 Computer/device information');
-  console.log('  📈 Productivity analytics');
-  console.log('\n📚 NEW MONITORING ENDPOINTS:');
-  console.log('  🔍 GET  /api/monitorUser/:userId');
-  console.log('      - Complete monitoring data for specific user');
-  console.log('      - Time tracking, screenshots, productivity stats');
-  console.log('      - Computer info, disconnection events');
-  console.log('  👥 GET  /api/monitorAllUsers');
-  console.log('      - Monitor ALL users in the company');
-  console.log('      - Comprehensive data for every employee');
-  console.log('  📊 GET  /api/userActivitySummary/:userId');
-  console.log('      - Simplified activity summary (less invasive)');
+  console.log('  📈 Productivity statistics');
+  console.log('\n📚 NEW SCREENSHOT MONITORING ENDPOINTS:');
+  console.log('  🔍 GET  /api/monitorUser/:userId?includeScreenshots=true');
+  console.log('      - Complete monitoring + actual screenshot images');
+  console.log('      - EXTREME PRIVACY IMPACT - Use with caution');
+  console.log('  👥 GET  /api/monitorAllUsers?includeScreenshots=true');
+  console.log('      - Monitor ALL users + screenshot images');
+  console.log('      - MAXIMUM PRIVACY IMPACT - Requires all consents');
+  console.log('  📸 GET  /api/getScreenshotsWithImages/:userId');
+  console.log('      - Screenshot images only for specific user');
+  console.log('      - Contains visual data of user\'s screen');
   console.log('\n📚 Standard endpoints:');
   console.log('  - GET  /api/health');
   console.log('  - GET  /api/auth/status (check token validity)');
@@ -1107,11 +1168,12 @@ app.listen(PORT, () => {
   console.log('    - DELETE /api/deleteFile/:fileId');
   console.log('  ⏱️  Time Tracking:');
   console.log('    - GET  /api/getWorkLogs');
-  console.log('    - GET  /api/getScreenshots');
+  console.log('    - GET  /api/getScreenshots (metadata only)');
   console.log('    - GET  /api/getTimeTracking');
   console.log('\n✅ Server is ready to accept requests!');
   console.log('🔄 Tokens will automatically refresh when expired');
-  console.log('🕵️ MONITORING: Use responsibly and legally!\n');
+  console.log('📸 SCREENSHOT MONITORING: Use with EXTREME caution and legal compliance!');
+  console.log('🚨 Remember: Screenshots show everything on user screens - handle responsibly!\n');
 });
 
 module.exports = app;
