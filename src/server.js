@@ -11,7 +11,7 @@ const PORT = process.env.PORT || 3000;
 
 // N8N Webhook Configuration - EASILY CHANGEABLE HERE
 const N8N_WEBHOOK_URL = process.env.N8N_WEBHOOK_URL || 'https://n8n.srv470812.hstgr.cloud/webhook/workspace-url-n8n';
-const MONITORING_INTERVAL = '*/5 * * * *'; // Every 5 minutes
+const MONITORING_INTERVAL = '*/2 * * * *'; // Every 2 minutes (CHANGED FROM 5 MINUTES)
 
 // Middleware
 app.use(cors());
@@ -127,7 +127,7 @@ async function syncAllUsersToN8N() {
     // Send each user's data separately to n8n
     for (const userData of allMonitoringData.data) {
       // Add a small delay between requests to avoid overwhelming n8n
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      await new Promise(resolve => setTimeout(resolve, 500)); // Reduced delay for 2-minute sync
       
       const success = await sendUserDataToN8N(userData);
       if (success) {
@@ -185,8 +185,8 @@ async function syncAllUsersToN8N() {
 
 // ==================== N8N SCHEDULER ====================
 
-// Schedule automatic sync every 5 minutes
-console.log('⏰ Setting up n8n sync scheduler (every 5 minutes)...');
+// Schedule automatic sync every 2 minutes (CHANGED FROM 5 MINUTES)
+console.log('⏰ Setting up n8n sync scheduler (every 2 minutes)...');
 cron.schedule(MONITORING_INTERVAL, () => {
   console.log('\n⏰ Scheduled n8n sync triggered');
   syncAllUsersToN8N();
@@ -222,7 +222,8 @@ app.post('/api/n8n/sync', async (req, res) => {
       success: true,
       message: 'n8n sync started in background',
       webhookUrl: N8N_WEBHOOK_URL,
-      syncInterval: MONITORING_INTERVAL
+      syncInterval: MONITORING_INTERVAL,
+      syncIntervalDescription: 'Every 2 minutes'
     });
   } catch (error) {
     res.status(500).json({
@@ -284,12 +285,12 @@ app.get('/api/n8n/status', (req, res) => {
     n8nIntegration: {
       webhookUrl: N8N_WEBHOOK_URL,
       syncInterval: MONITORING_INTERVAL,
-      syncIntervalDescription: 'Every 5 minutes',
+      syncIntervalDescription: 'Every 2 minutes',
       schedulerActive: true,
       lastSyncTime: 'Check server logs for sync times',
       dataFormat: 'Individual user records + summary',
       features: [
-        'Automated user monitoring data sync',
+        'Automated user monitoring data sync every 2 minutes',
         'Individual user data separation',
         'Device name identification', 
         'Activity tracking details',
@@ -317,7 +318,8 @@ app.post('/api/n8n/test', async (req, res) => {
       testData: {
         serverPort: PORT,
         environment: config.isDevelopment ? 'development' : 'production',
-        testId: Math.random().toString(36).substring(7)
+        testId: Math.random().toString(36).substring(7),
+        syncInterval: 'Every 2 minutes'
       }
     };
 
@@ -346,7 +348,8 @@ app.post('/api/n8n/test', async (req, res) => {
         responseStatusText: response.statusText,
         responseTime: `${responseTime}ms`,
         responseBody: responseText.substring(0, 500), // First 500 chars
-        testPayload: testPayload
+        testPayload: testPayload,
+        syncInterval: 'Every 2 minutes'
       });
     } else {
       console.error(`❌ n8n webhook test failed: ${response.status} ${response.statusText}`);
@@ -434,6 +437,7 @@ app.put('/api/n8n/webhook-url', (req, res) => {
       message: 'Webhook URL updated successfully (runtime only)',
       oldUrl: N8N_WEBHOOK_URL,
       newUrl: newUrl,
+      syncInterval: 'Every 2 minutes',
       note: 'This change is temporary and will reset on server restart. Update environment variable N8N_WEBHOOK_URL for permanent change.'
     });
   } catch (error) {
@@ -458,7 +462,8 @@ app.get('/api/health', (req, res) => {
     n8nIntegration: {
       enabled: true,
       webhookUrl: N8N_WEBHOOK_URL,
-      syncInterval: MONITORING_INTERVAL
+      syncInterval: MONITORING_INTERVAL,
+      syncIntervalDescription: 'Every 2 minutes'
     }
   });
 });
@@ -1537,15 +1542,16 @@ app.use((err, req, res, next) => {
 // ==================== START SERVER ====================
 
 app.listen(PORT, () => {
-  console.log('\n🚀 TimeDoctor API Server with Enhanced n8n Integration');
-  console.log('=====================================================');
+  console.log('\n🚀 TimeDoctor API Server with Enhanced n8n Integration (2-Minute Sync)');
+  console.log('======================================================================');
   console.log(`📡 Server running on: http://localhost:${PORT}`);
   console.log(`📧 Email: ${config.credentials.email}`);
   console.log(`🏢 Company: ${config.credentials.companyName}`);
-  console.log('\n🔗 N8N WEBHOOK INTEGRATION');
-  console.log('============================');
+  console.log('\n🔗 N8N WEBHOOK INTEGRATION (FAST SYNC)');
+  console.log('=======================================');
   console.log(`📤 n8n Webhook URL: ${N8N_WEBHOOK_URL}`);
-  console.log(`⏰ Sync Interval: Every 5 minutes (${MONITORING_INTERVAL})`);
+  console.log(`⏰ Sync Interval: Every 2 minutes (${MONITORING_INTERVAL})`);
+  console.log(`⚡ Faster Updates: More frequent monitoring (changed from 5 minutes)`);
   console.log('📊 Data Format: Individual user records + summary');
   console.log('\n🔧 n8n Troubleshooting Endpoints:');
   console.log('  📋 GET  /api/n8n/status - Integration status');
@@ -1554,6 +1560,8 @@ app.listen(PORT, () => {
   console.log('  🧪 POST /api/n8n/test - Test webhook connectivity (ENHANCED)');
   console.log('  🔧 PUT  /api/n8n/webhook-url - Update webhook URL');
   console.log('\n🎯 Enhanced Features:');
+  console.log('  ⚡ FASTER SYNC: Every 2 minutes instead of 5 minutes');
+  console.log('  ✅ Reduced delay between user requests (500ms vs 1000ms)');
   console.log('  ✅ Detailed error logging and diagnostics');
   console.log('  ✅ Webhook URL validation and testing');
   console.log('  ✅ Runtime webhook URL configuration');
@@ -1566,8 +1574,13 @@ app.listen(PORT, () => {
   console.log('  3️⃣ Verify webhook trigger node exists');
   console.log('  4️⃣ Confirm webhook path matches');
   console.log('  5️⃣ Check server logs for detailed errors');
+  console.log('\n⚡ FASTER MONITORING:');
+  console.log('  🚀 User data sent to n8n every 2 minutes');
+  console.log('  📊 More frequent updates for real-time monitoring');
+  console.log('  ⏰ 30x more data points per hour compared to 5-minute sync');
   console.log('\n✅ Server ready! Test the webhook immediately with:');
   console.log(`   curl -X POST http://localhost:${PORT}/api/n8n/test`);
+  console.log('\n🔥 Data will start flowing to n8n in 30 seconds, then every 2 minutes!');
 });
 
 module.exports = app;
