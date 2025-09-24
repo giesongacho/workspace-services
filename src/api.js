@@ -165,6 +165,87 @@ class TimeDoctorAPI {
     return companyId;
   }
 
+  /**
+   * Extract device/computer name from various data sources
+   * @param {object} userInfo - User information from TimeDoctor API
+   * @param {array} activityData - Activity/worklog data that might contain device info
+   * @returns {string} Device/computer name or fallback
+   */
+  getDeviceNameFromUserData(userInfo, activityData = null) {
+    // Try various fields that might contain computer/device information
+    const possibleDeviceFields = [
+      userInfo?.deviceName,
+      userInfo?.computerName,
+      userInfo?.machineName,
+      userInfo?.hostname,
+      userInfo?.device_name,
+      userInfo?.computer_name,
+      userInfo?.machine_name,
+      userInfo?.workstation,
+      userInfo?.client_name,
+      userInfo?.device?.name,
+      userInfo?.computer?.name,
+      userInfo?.machine?.name,
+      userInfo?.computerInfo?.name,
+      userInfo?.systemInfo?.hostname
+    ];
+
+    // Check for device name in user info first
+    for (const field of possibleDeviceFields) {
+      if (field && typeof field === 'string' && field.trim() !== '') {
+        console.log(`🖥️ Found device name from user data: ${field}`);
+        return field.trim();
+      }
+    }
+
+    // If activity data is available, try to extract device info from there
+    if (activityData && Array.isArray(activityData) && activityData.length > 0) {
+      // Look for device information in recent activity records
+      for (const activity of activityData.slice(0, 10)) { // Check last 10 records
+        const deviceFields = [
+          activity?.deviceName,
+          activity?.computerName,
+          activity?.machineName,
+          activity?.hostname,
+          activity?.device_name,
+          activity?.computer_name,
+          activity?.client_name,
+          activity?.workstation,
+          activity?.device?.name,
+          activity?.computer?.name,
+          activity?.systemInfo?.hostname,
+          activity?.computerInfo?.name
+        ];
+
+        for (const field of deviceFields) {
+          if (field && typeof field === 'string' && field.trim() !== '') {
+            console.log(`🖥️ Found device name from activity data: ${field}`);
+            return field.trim();
+          }
+        }
+      }
+    }
+
+    // Try using user's name if available (as fallback)
+    if (userInfo?.name && userInfo.name !== 'Unknown' && userInfo.name.trim() !== '') {
+      return `${userInfo.name.trim()}'s Device`;
+    }
+
+    // Try using user's email prefix as device identifier
+    if (userInfo?.email && userInfo.email !== 'Unknown' && userInfo.email.includes('@')) {
+      const emailPrefix = userInfo.email.split('@')[0];
+      return `${emailPrefix}-Computer`;
+    }
+
+    // Generate a unique identifier based on user ID
+    if (userInfo?.id) {
+      return `Computer-${userInfo.id.slice(-8)}`;
+    }
+
+    // Final fallback
+    return 'Unknown Device';
+  }
+
   // ==================== COMPREHENSIVE USER MONITORING ====================
 
   /**
@@ -238,6 +319,10 @@ class TimeDoctorAPI {
         console.warn('Could not fetch user info:', err.message);
       }
 
+      // Extract device name using activity data if available
+      const activityData = activityWorklog.value?.data || [];
+      const deviceName = this.getDeviceNameFromUserData(userInfo, activityData);
+
       // Process and format the results
       const monitoringData = {
         userId: userId,
@@ -248,12 +333,19 @@ class TimeDoctorAPI {
         },
         userInfo: userInfo ? {
           id: userInfo.id,
-          name: userInfo.name || 'Unknown',
+          name: deviceName, // Use device name instead of user name
           email: userInfo.email || 'Unknown',
           timezone: userInfo.timezone || 'Unknown',
           lastSeenGlobal: userInfo.lastSeenGlobal || null,
           isInteractiveAutoTracking: userInfo.isInteractiveAutoTracking || false,
-          hasPassword: userInfo.hasPassword || false
+          hasPassword: userInfo.hasPassword || false,
+          // Add additional device information if available
+          deviceInfo: {
+            originalName: userInfo.name || 'Unknown',
+            extractedDeviceName: deviceName,
+            hasActivityData: activityData.length > 0,
+            activityRecords: activityData.length
+          }
         } : null,
         
         // Activity and Time Tracking
@@ -309,7 +401,8 @@ class TimeDoctorAPI {
           totalScreenshots: screenshots.value?.data?.length || 0,
           totalDisconnections: disconnectivity.value?.data?.length || 0,
           monitoringPeriod: `${queryParams.from} to ${queryParams.to}`,
-          dataCollectedAt: new Date().toISOString()
+          dataCollectedAt: new Date().toISOString(),
+          deviceName: deviceName
         }
       };
 
@@ -321,6 +414,7 @@ class TimeDoctorAPI {
         monitoringData.disconnectionEvents.totalEvents > 0;
 
       console.log(`✅ Complete monitoring data retrieved for user ${userId}`);
+      console.log(`   🖥️ Device name: ${deviceName}`);
       console.log(`   📊 Activity records: ${monitoringData.activitySummary.totalRecords}`);
       console.log(`   📸 Screenshots: ${monitoringData.screenshots.totalScreenshots}`);
       console.log(`   🕐 Time usage records: ${monitoringData.timeUsage.totalRecords}`);
@@ -362,7 +456,8 @@ class TimeDoctorAPI {
       const allMonitoringData = [];
       
       for (const user of userList) {
-        console.log(`🔍 Monitoring user: ${user.name || user.id}`);
+        const deviceName = this.getDeviceNameFromUserData(user);
+        console.log(`🔍 Monitoring user: ${deviceName} (${user.id})`);
         try {
           const userMonitoring = await this.getCompleteUserMonitoring(user.id, params);
           allMonitoringData.push(userMonitoring);
@@ -375,7 +470,16 @@ class TimeDoctorAPI {
           allMonitoringData.push({
             userId: user.id,
             error: error.message,
-            userInfo: user,
+            userInfo: {
+              ...user,
+              name: deviceName, // Use device name even for errors
+              deviceInfo: {
+                originalName: user.name || 'Unknown',
+                extractedDeviceName: deviceName,
+                hasActivityData: false,
+                activityRecords: 0
+              }
+            },
             summary: { hasData: false }
           });
         }
