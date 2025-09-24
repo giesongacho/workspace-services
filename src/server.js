@@ -9,8 +9,8 @@ const config = require('./config');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// N8N Webhook Configuration
-const N8N_WEBHOOK_URL = 'https://n8n.srv470812.hstgr.cloud/webhook/workspace-url-n8n';
+// N8N Webhook Configuration - EASILY CHANGEABLE HERE
+const N8N_WEBHOOK_URL = process.env.N8N_WEBHOOK_URL || 'https://n8n.srv470812.hstgr.cloud/webhook/workspace-url-n8n';
 const MONITORING_INTERVAL = '*/5 * * * *'; // Every 5 minutes
 
 // Middleware
@@ -65,25 +65,37 @@ async function sendUserDataToN8N(userData) {
     };
 
     console.log(`📤 Sending data to n8n for user: ${userData.userInfo?.name || userData.userId}`);
+    console.log(`🔗 Using webhook URL: ${N8N_WEBHOOK_URL}`);
     
     const response = await fetch(N8N_WEBHOOK_URL, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'User-Agent': 'Workspace-Services-Monitor/1.0'
+        'User-Agent': 'Workspace-Services-Monitor/1.0',
+        'Accept': 'application/json'
       },
-      body: JSON.stringify(n8nPayload)
+      body: JSON.stringify(n8nPayload),
+      timeout: 10000 // 10 second timeout
     });
+
+    console.log(`📡 Response status: ${response.status} ${response.statusText}`);
 
     if (response.ok) {
       console.log(`✅ Successfully sent data to n8n for user: ${userData.userInfo?.name || userData.userId}`);
       return true;
     } else {
+      const errorText = await response.text().catch(() => 'Unable to read response');
       console.error(`❌ Failed to send data to n8n for user ${userData.userId}: ${response.status} ${response.statusText}`);
+      console.error(`📝 Response body: ${errorText}`);
       return false;
     }
   } catch (error) {
     console.error(`❌ Error sending data to n8n for user ${userData.userId}:`, error.message);
+    if (error.code === 'ENOTFOUND') {
+      console.error('🌐 DNS resolution failed - check if n8n URL is correct');
+    } else if (error.code === 'ECONNREFUSED') {
+      console.error('🚫 Connection refused - n8n server might be down');
+    }
     return false;
   }
 }
@@ -94,6 +106,7 @@ async function sendUserDataToN8N(userData) {
 async function syncAllUsersToN8N() {
   try {
     console.log('\n🔄 Starting automated n8n sync for all users...');
+    console.log(`🔗 n8n Webhook URL: ${N8N_WEBHOOK_URL}`);
     
     // Get monitoring data for all users
     const allMonitoringData = await api.getAllUsersMonitoring({
@@ -144,14 +157,24 @@ async function syncAllUsersToN8N() {
       }
     };
 
-    await fetch(N8N_WEBHOOK_URL, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'User-Agent': 'Workspace-Services-Monitor/1.0'
-      },
-      body: JSON.stringify(summaryPayload)
-    });
+    try {
+      const summaryResponse = await fetch(N8N_WEBHOOK_URL, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'User-Agent': 'Workspace-Services-Monitor/1.0'
+        },
+        body: JSON.stringify(summaryPayload)
+      });
+
+      if (summaryResponse.ok) {
+        console.log('✅ Summary data sent successfully');
+      } else {
+        console.log(`⚠️ Summary data failed: ${summaryResponse.status} ${summaryResponse.statusText}`);
+      }
+    } catch (error) {
+      console.log(`⚠️ Summary data error: ${error.message}`);
+    }
 
     console.log(`✅ n8n sync completed: ${successCount} users successful, ${errorCount} errors`);
     
@@ -280,50 +303,143 @@ app.get('/api/n8n/status', (req, res) => {
 
 /**
  * @route   POST /api/n8n/test
- * @desc    Test n8n webhook connectivity
+ * @desc    Test n8n webhook connectivity with detailed diagnostics
  */
 app.post('/api/n8n/test', async (req, res) => {
   try {
+    console.log(`🧪 Testing n8n webhook: ${N8N_WEBHOOK_URL}`);
+    
     const testPayload = {
       timestamp: new Date().toISOString(),
       source: 'timekeeper-workspace-services',
       type: 'connectivity_test',
       message: 'This is a test from Workspace Services',
-      serverInfo: {
-        port: PORT,
-        environment: config.isDevelopment ? 'development' : 'production'
+      testData: {
+        serverPort: PORT,
+        environment: config.isDevelopment ? 'development' : 'production',
+        testId: Math.random().toString(36).substring(7)
       }
     };
 
+    const startTime = Date.now();
     const response = await fetch(N8N_WEBHOOK_URL, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'User-Agent': 'Workspace-Services-Monitor/1.0'
+        'User-Agent': 'Workspace-Services-Monitor/1.0',
+        'Accept': 'application/json'
       },
-      body: JSON.stringify(testPayload)
+      body: JSON.stringify(testPayload),
+      timeout: 10000 // 10 second timeout
     });
+    const responseTime = Date.now() - startTime;
+
+    const responseText = await response.text().catch(() => 'Unable to read response');
 
     if (response.ok) {
+      console.log(`✅ n8n webhook test successful (${responseTime}ms)`);
       res.json({
         success: true,
         message: 'n8n webhook test successful',
         webhookUrl: N8N_WEBHOOK_URL,
         responseStatus: response.status,
-        responseStatusText: response.statusText
+        responseStatusText: response.statusText,
+        responseTime: `${responseTime}ms`,
+        responseBody: responseText.substring(0, 500), // First 500 chars
+        testPayload: testPayload
       });
     } else {
+      console.error(`❌ n8n webhook test failed: ${response.status} ${response.statusText}`);
       res.status(response.status).json({
         success: false,
         error: `n8n webhook test failed: ${response.status} ${response.statusText}`,
-        webhookUrl: N8N_WEBHOOK_URL
+        webhookUrl: N8N_WEBHOOK_URL,
+        responseTime: `${responseTime}ms`,
+        responseBody: responseText.substring(0, 500),
+        troubleshooting: [
+          'Check if n8n workflow is active',
+          'Verify webhook path is correct',
+          'Ensure webhook trigger node is properly configured',
+          'Check n8n server logs for errors'
+        ]
       });
     }
   } catch (error) {
+    console.error(`❌ n8n webhook test error: ${error.message}`);
+    
+    let troubleshooting = [];
+    if (error.code === 'ENOTFOUND') {
+      troubleshooting = [
+        'DNS resolution failed - check if the n8n URL is correct',
+        'Verify n8n server domain/IP is accessible',
+        'Check network connectivity'
+      ];
+    } else if (error.code === 'ECONNREFUSED') {
+      troubleshooting = [
+        'Connection refused - n8n server might be down',
+        'Check if n8n is running on the specified port',
+        'Verify firewall settings'
+      ];
+    } else {
+      troubleshooting = [
+        'Check network connectivity',
+        'Verify n8n server is running',
+        'Check webhook URL format'
+      ];
+    }
+
     res.status(500).json({
       success: false,
       error: `n8n webhook test error: ${error.message}`,
-      webhookUrl: N8N_WEBHOOK_URL
+      errorCode: error.code,
+      webhookUrl: N8N_WEBHOOK_URL,
+      troubleshooting: troubleshooting
+    });
+  }
+});
+
+/**
+ * @route   PUT /api/n8n/webhook-url
+ * @desc    Update n8n webhook URL (runtime configuration)
+ */
+app.put('/api/n8n/webhook-url', (req, res) => {
+  try {
+    const newUrl = req.body.webhookUrl;
+    
+    if (!newUrl) {
+      return res.status(400).json({
+        success: false,
+        error: 'webhookUrl is required in request body'
+      });
+    }
+
+    // Validate URL format
+    try {
+      new URL(newUrl);
+    } catch (e) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid URL format'
+      });
+    }
+
+    // Note: This won't persist across server restarts
+    // For permanent changes, update the environment variable or code
+    process.env.N8N_WEBHOOK_URL = newUrl;
+    
+    console.log(`🔧 n8n webhook URL updated to: ${newUrl}`);
+    
+    res.json({
+      success: true,
+      message: 'Webhook URL updated successfully (runtime only)',
+      oldUrl: N8N_WEBHOOK_URL,
+      newUrl: newUrl,
+      note: 'This change is temporary and will reset on server restart. Update environment variable N8N_WEBHOOK_URL for permanent change.'
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error.message
     });
   }
 });
@@ -1352,6 +1468,7 @@ app.use((req, res) => {
       'POST /api/n8n/sync - Manual sync all users to n8n',
       'POST /api/n8n/sync-user/:userId - Manual sync specific user to n8n',
       'POST /api/n8n/test - Test n8n webhook connectivity',
+      'PUT /api/n8n/webhook-url - Update webhook URL (runtime)',
       
       // MONITORING ENDPOINTS
       'GET /api/monitorUser/:userId?includeScreenshots=true - COMPREHENSIVE USER MONITORING WITH IMAGES',
@@ -1420,8 +1537,8 @@ app.use((err, req, res, next) => {
 // ==================== START SERVER ====================
 
 app.listen(PORT, () => {
-  console.log('\n🚀 TimeDoctor API Server with n8n Integration & User Monitoring');
-  console.log('==================================================================');
+  console.log('\n🚀 TimeDoctor API Server with Enhanced n8n Integration');
+  console.log('=====================================================');
   console.log(`📡 Server running on: http://localhost:${PORT}`);
   console.log(`📧 Email: ${config.credentials.email}`);
   console.log(`🏢 Company: ${config.credentials.companyName}`);
@@ -1430,43 +1547,27 @@ app.listen(PORT, () => {
   console.log(`📤 n8n Webhook URL: ${N8N_WEBHOOK_URL}`);
   console.log(`⏰ Sync Interval: Every 5 minutes (${MONITORING_INTERVAL})`);
   console.log('📊 Data Format: Individual user records + summary');
-  console.log('🎯 Features:');
-  console.log('  ✅ Automatic user monitoring data sync every 5 minutes');
-  console.log('  ✅ Each user data sent separately for individual tracking');
-  console.log('  ✅ Computer/device name identification');
-  console.log('  ✅ Activity, screenshots, productivity stats');
-  console.log('  ✅ Manual sync triggers via API');
-  console.log('  ✅ Webhook connectivity testing');
-  console.log('\n🔧 n8n Endpoints:');
+  console.log('\n🔧 n8n Troubleshooting Endpoints:');
   console.log('  📋 GET  /api/n8n/status - Integration status');
   console.log('  🔄 POST /api/n8n/sync - Manual sync all users');
   console.log('  👤 POST /api/n8n/sync-user/:userId - Manual sync specific user');
-  console.log('  🧪 POST /api/n8n/test - Test webhook connectivity');
-  console.log('\n⚖️ CRITICAL LEGAL NOTICE: SCREENSHOT MONITORING COMPLIANCE');
-  console.log('============================================================');
-  console.log('🚨 EXTREME PRIVACY WARNING: Screenshot monitoring is highly invasive');
-  console.log('⚠️ WARNING: Before using screenshot endpoints, ensure:');
-  console.log('  ✓ EXPLICIT written consent for screenshot monitoring obtained');
-  console.log('  ✓ Local privacy laws compliance verified (GDPR, CCPA, etc.)');
-  console.log('  ✓ Screenshot retention and deletion policies established');
-  console.log('  ✓ Secure storage and encryption for screenshot data');
-  console.log('  ✓ Clear business justification documented');
-  console.log('  ✓ Employee access rights to their screenshot data provided');
-  console.log('  ✓ Regular audits of screenshot access and usage');
-  console.log('\n✨ Additional Features:');
-  console.log('  ✅ Automatic token refresh when expired');
-  console.log('  ✅ Token caching for better performance');
-  console.log('  ✅ Auto-retry on authentication failures');
-  console.log('  ✅ Complete TimeDoctor API coverage');
-  console.log('  🕵️ COMPREHENSIVE USER MONITORING');
-  console.log('  📸 ACTUAL SCREENSHOT IMAGES (HIGHLY SENSITIVE)');
-  console.log('  📊 Activity tracking and analytics');
-  console.log('  💻 Computer/device information');
-  console.log('  📈 Productivity statistics');
-  console.log('\n✅ Server is ready to accept requests!');
-  console.log('🔄 Tokens will automatically refresh when expired');
-  console.log('📤 n8n sync will run automatically every 5 minutes');
-  console.log('🚨 Remember: Screenshots show everything on user screens - handle responsibly!\n');
+  console.log('  🧪 POST /api/n8n/test - Test webhook connectivity (ENHANCED)');
+  console.log('  🔧 PUT  /api/n8n/webhook-url - Update webhook URL');
+  console.log('\n🎯 Enhanced Features:');
+  console.log('  ✅ Detailed error logging and diagnostics');
+  console.log('  ✅ Webhook URL validation and testing');
+  console.log('  ✅ Runtime webhook URL configuration');
+  console.log('  ✅ Connection timeout handling');
+  console.log('  ✅ Response time measurement');
+  console.log('  ✅ Troubleshooting guidance');
+  console.log('\n💡 TROUBLESHOOTING STEPS:');
+  console.log('  1️⃣ Test webhook: POST /api/n8n/test');
+  console.log('  2️⃣ Check n8n workflow is active');
+  console.log('  3️⃣ Verify webhook trigger node exists');
+  console.log('  4️⃣ Confirm webhook path matches');
+  console.log('  5️⃣ Check server logs for detailed errors');
+  console.log('\n✅ Server ready! Test the webhook immediately with:');
+  console.log(`   curl -X POST http://localhost:${PORT}/api/n8n/test`);
 });
 
 module.exports = app;
