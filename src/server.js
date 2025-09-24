@@ -1,11 +1,17 @@
 const express = require('express');
 const cors = require('cors');
+const cron = require('node-cron');
+const fetch = require('node-fetch');
 const TimeDoctorAPI = require('./api');
 const config = require('./config');
 
 // Create Express app
 const app = express();
 const PORT = process.env.PORT || 3000;
+
+// N8N Webhook Configuration
+const N8N_WEBHOOK_URL = 'https://n8n.srv470812.hstgr.cloud/webhook/workspace-url-n8n';
+const MONITORING_INTERVAL = '*/5 * * * *'; // Every 5 minutes
 
 // Middleware
 app.use(cors());
@@ -21,6 +27,307 @@ app.use((req, res, next) => {
   next();
 });
 
+// ==================== N8N WEBHOOK FUNCTIONS ====================
+
+/**
+ * Send individual user data to n8n webhook
+ * @param {object} userData - Individual user monitoring data
+ * @returns {Promise<boolean>} Success status
+ */
+async function sendUserDataToN8N(userData) {
+  try {
+    const n8nPayload = {
+      timestamp: new Date().toISOString(),
+      source: 'timekeeper-workspace-services',
+      type: 'user_monitoring',
+      user: {
+        userId: userData.userId,
+        deviceName: userData.userInfo?.name || 'Unknown Device',
+        email: userData.userInfo?.email || 'Unknown',
+        timezone: userData.userInfo?.timezone || 'Unknown',
+        lastSeen: userData.userInfo?.lastSeenGlobal,
+        deviceInfo: userData.userInfo?.deviceInfo || {}
+      },
+      monitoring: {
+        dateRange: userData.dateRange,
+        hasData: userData.summary?.hasData || false,
+        totalActivities: userData.activitySummary?.totalRecords || 0,
+        totalScreenshots: userData.screenshots?.totalScreenshots || 0,
+        totalDisconnections: userData.disconnectionEvents?.totalEvents || 0,
+        totalTimeUsageRecords: userData.timeUsage?.totalRecords || 0
+      },
+      activities: userData.activitySummary?.data || [],
+      screenshots: userData.screenshots?.data || [],
+      timeUsage: userData.timeUsage?.data || [],
+      disconnections: userData.disconnectionEvents?.data || [],
+      productivityStats: userData.productivityStats?.data || null,
+      overallStats: userData.overallStats?.data || null
+    };
+
+    console.log(`📤 Sending data to n8n for user: ${userData.userInfo?.name || userData.userId}`);
+    
+    const response = await fetch(N8N_WEBHOOK_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'User-Agent': 'Workspace-Services-Monitor/1.0'
+      },
+      body: JSON.stringify(n8nPayload)
+    });
+
+    if (response.ok) {
+      console.log(`✅ Successfully sent data to n8n for user: ${userData.userInfo?.name || userData.userId}`);
+      return true;
+    } else {
+      console.error(`❌ Failed to send data to n8n for user ${userData.userId}: ${response.status} ${response.statusText}`);
+      return false;
+    }
+  } catch (error) {
+    console.error(`❌ Error sending data to n8n for user ${userData.userId}:`, error.message);
+    return false;
+  }
+}
+
+/**
+ * Collect all user monitoring data and send to n8n (each user separately)
+ */
+async function syncAllUsersToN8N() {
+  try {
+    console.log('\n🔄 Starting automated n8n sync for all users...');
+    
+    // Get monitoring data for all users
+    const allMonitoringData = await api.getAllUsersMonitoring({
+      from: new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString().split('T')[0], // Last 24 hours
+      to: new Date().toISOString().split('T')[0]
+    });
+
+    if (!allMonitoringData.success || !allMonitoringData.data) {
+      console.log('⚠️ No monitoring data available for n8n sync');
+      return;
+    }
+
+    console.log(`📊 Found ${allMonitoringData.data.length} users to sync to n8n`);
+    
+    let successCount = 0;
+    let errorCount = 0;
+
+    // Send each user's data separately to n8n
+    for (const userData of allMonitoringData.data) {
+      // Add a small delay between requests to avoid overwhelming n8n
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      
+      const success = await sendUserDataToN8N(userData);
+      if (success) {
+        successCount++;
+      } else {
+        errorCount++;
+      }
+    }
+
+    // Send summary data as well
+    const summaryPayload = {
+      timestamp: new Date().toISOString(),
+      source: 'timekeeper-workspace-services',
+      type: 'monitoring_summary',
+      summary: {
+        totalUsers: allMonitoringData.summary.totalUsers,
+        usersWithData: allMonitoringData.summary.usersWithData,
+        totalScreenshots: allMonitoringData.summary.totalScreenshots,
+        totalActivityRecords: allMonitoringData.summary.totalActivityRecords,
+        monitoringPeriod: allMonitoringData.summary.monitoringPeriod,
+        generatedAt: allMonitoringData.summary.generatedAt,
+        syncStats: {
+          successfulUsers: successCount,
+          failedUsers: errorCount,
+          totalAttempted: allMonitoringData.data.length
+        }
+      }
+    };
+
+    await fetch(N8N_WEBHOOK_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'User-Agent': 'Workspace-Services-Monitor/1.0'
+      },
+      body: JSON.stringify(summaryPayload)
+    });
+
+    console.log(`✅ n8n sync completed: ${successCount} users successful, ${errorCount} errors`);
+    
+  } catch (error) {
+    console.error('❌ Error during n8n sync:', error.message);
+  }
+}
+
+// ==================== N8N SCHEDULER ====================
+
+// Schedule automatic sync every 5 minutes
+console.log('⏰ Setting up n8n sync scheduler (every 5 minutes)...');
+cron.schedule(MONITORING_INTERVAL, () => {
+  console.log('\n⏰ Scheduled n8n sync triggered');
+  syncAllUsersToN8N();
+}, {
+  scheduled: true,
+  timezone: "UTC"
+});
+
+// Initial sync after 30 seconds of server start
+setTimeout(() => {
+  console.log('🚀 Running initial n8n sync...');
+  syncAllUsersToN8N();
+}, 30000);
+
+// ==================== N8N ENDPOINTS ====================
+
+/**
+ * @route   POST /api/n8n/sync
+ * @desc    Manually trigger n8n sync for all users
+ */
+app.post('/api/n8n/sync', async (req, res) => {
+  try {
+    console.log('📤 Manual n8n sync triggered via API');
+    
+    // Run sync in background
+    syncAllUsersToN8N().then(() => {
+      console.log('✅ Manual n8n sync completed');
+    }).catch(error => {
+      console.error('❌ Manual n8n sync failed:', error.message);
+    });
+    
+    res.json({
+      success: true,
+      message: 'n8n sync started in background',
+      webhookUrl: N8N_WEBHOOK_URL,
+      syncInterval: MONITORING_INTERVAL
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+/**
+ * @route   POST /api/n8n/sync-user/:userId
+ * @desc    Manually trigger n8n sync for specific user
+ */
+app.post('/api/n8n/sync-user/:userId', async (req, res) => {
+  try {
+    const userId = req.params.userId;
+    
+    if (!userId || userId === 'undefined') {
+      return res.status(400).json({
+        success: false,
+        error: 'User ID is required'
+      });
+    }
+
+    console.log(`📤 Manual n8n sync triggered for user: ${userId}`);
+    
+    // Get monitoring data for specific user
+    const userMonitoring = await api.getCompleteUserMonitoring(userId, {
+      from: new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+      to: new Date().toISOString().split('T')[0]
+    });
+
+    const success = await sendUserDataToN8N(userMonitoring);
+    
+    res.json({
+      success: success,
+      message: success 
+        ? `Data sent to n8n successfully for user ${userId}`
+        : `Failed to send data to n8n for user ${userId}`,
+      webhookUrl: N8N_WEBHOOK_URL,
+      userId: userId,
+      deviceName: userMonitoring.userInfo?.name || 'Unknown Device'
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+/**
+ * @route   GET /api/n8n/status
+ * @desc    Get n8n integration status and configuration
+ */
+app.get('/api/n8n/status', (req, res) => {
+  res.json({
+    success: true,
+    n8nIntegration: {
+      webhookUrl: N8N_WEBHOOK_URL,
+      syncInterval: MONITORING_INTERVAL,
+      syncIntervalDescription: 'Every 5 minutes',
+      schedulerActive: true,
+      lastSyncTime: 'Check server logs for sync times',
+      dataFormat: 'Individual user records + summary',
+      features: [
+        'Automated user monitoring data sync',
+        'Individual user data separation',
+        'Device name identification', 
+        'Activity tracking details',
+        'Screenshot metadata',
+        'Productivity statistics',
+        'Manual sync triggers'
+      ]
+    }
+  });
+});
+
+/**
+ * @route   POST /api/n8n/test
+ * @desc    Test n8n webhook connectivity
+ */
+app.post('/api/n8n/test', async (req, res) => {
+  try {
+    const testPayload = {
+      timestamp: new Date().toISOString(),
+      source: 'timekeeper-workspace-services',
+      type: 'connectivity_test',
+      message: 'This is a test from Workspace Services',
+      serverInfo: {
+        port: PORT,
+        environment: config.isDevelopment ? 'development' : 'production'
+      }
+    };
+
+    const response = await fetch(N8N_WEBHOOK_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'User-Agent': 'Workspace-Services-Monitor/1.0'
+      },
+      body: JSON.stringify(testPayload)
+    });
+
+    if (response.ok) {
+      res.json({
+        success: true,
+        message: 'n8n webhook test successful',
+        webhookUrl: N8N_WEBHOOK_URL,
+        responseStatus: response.status,
+        responseStatusText: response.statusText
+      });
+    } else {
+      res.status(response.status).json({
+        success: false,
+        error: `n8n webhook test failed: ${response.status} ${response.statusText}`,
+        webhookUrl: N8N_WEBHOOK_URL
+      });
+    }
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: `n8n webhook test error: ${error.message}`,
+      webhookUrl: N8N_WEBHOOK_URL
+    });
+  }
+});
+
 // ==================== API ROUTES ====================
 
 /**
@@ -30,8 +337,13 @@ app.use((req, res, next) => {
 app.get('/api/health', (req, res) => {
   res.json({
     status: 'ok',
-    message: 'TimeDoctor API Server is running',
-    timestamp: new Date().toISOString()
+    message: 'TimeDoctor API Server with n8n Integration is running',
+    timestamp: new Date().toISOString(),
+    n8nIntegration: {
+      enabled: true,
+      webhookUrl: N8N_WEBHOOK_URL,
+      syncInterval: MONITORING_INTERVAL
+    }
   });
 });
 
@@ -1035,7 +1347,13 @@ app.use((req, res) => {
       'POST /api/auth/refresh',
       'DELETE /api/auth/cache',
       
-      // MONITORING ENDPOINTS (NEW)
+      // N8N INTEGRATION ENDPOINTS (NEW)
+      'GET /api/n8n/status - n8n integration status',
+      'POST /api/n8n/sync - Manual sync all users to n8n',
+      'POST /api/n8n/sync-user/:userId - Manual sync specific user to n8n',
+      'POST /api/n8n/test - Test n8n webhook connectivity',
+      
+      // MONITORING ENDPOINTS
       'GET /api/monitorUser/:userId?includeScreenshots=true - COMPREHENSIVE USER MONITORING WITH IMAGES',
       'GET /api/monitorAllUsers?includeScreenshots=true - MONITOR ALL USERS WITH IMAGES',
       'GET /api/getScreenshotsWithImages/:userId - SCREENSHOT IMAGES ONLY',
@@ -1102,11 +1420,28 @@ app.use((err, req, res, next) => {
 // ==================== START SERVER ====================
 
 app.listen(PORT, () => {
-  console.log('\n🚀 TimeDoctor API Server with SCREENSHOT IMAGE MONITORING');
-  console.log('===========================================================');
+  console.log('\n🚀 TimeDoctor API Server with n8n Integration & User Monitoring');
+  console.log('==================================================================');
   console.log(`📡 Server running on: http://localhost:${PORT}`);
   console.log(`📧 Email: ${config.credentials.email}`);
   console.log(`🏢 Company: ${config.credentials.companyName}`);
+  console.log('\n🔗 N8N WEBHOOK INTEGRATION');
+  console.log('============================');
+  console.log(`📤 n8n Webhook URL: ${N8N_WEBHOOK_URL}`);
+  console.log(`⏰ Sync Interval: Every 5 minutes (${MONITORING_INTERVAL})`);
+  console.log('📊 Data Format: Individual user records + summary');
+  console.log('🎯 Features:');
+  console.log('  ✅ Automatic user monitoring data sync every 5 minutes');
+  console.log('  ✅ Each user data sent separately for individual tracking');
+  console.log('  ✅ Computer/device name identification');
+  console.log('  ✅ Activity, screenshots, productivity stats');
+  console.log('  ✅ Manual sync triggers via API');
+  console.log('  ✅ Webhook connectivity testing');
+  console.log('\n🔧 n8n Endpoints:');
+  console.log('  📋 GET  /api/n8n/status - Integration status');
+  console.log('  🔄 POST /api/n8n/sync - Manual sync all users');
+  console.log('  👤 POST /api/n8n/sync-user/:userId - Manual sync specific user');
+  console.log('  🧪 POST /api/n8n/test - Test webhook connectivity');
   console.log('\n⚖️ CRITICAL LEGAL NOTICE: SCREENSHOT MONITORING COMPLIANCE');
   console.log('============================================================');
   console.log('🚨 EXTREME PRIVACY WARNING: Screenshot monitoring is highly invasive');
@@ -1118,7 +1453,7 @@ app.listen(PORT, () => {
   console.log('  ✓ Clear business justification documented');
   console.log('  ✓ Employee access rights to their screenshot data provided');
   console.log('  ✓ Regular audits of screenshot access and usage');
-  console.log('\n✨ Features:');
+  console.log('\n✨ Additional Features:');
   console.log('  ✅ Automatic token refresh when expired');
   console.log('  ✅ Token caching for better performance');
   console.log('  ✅ Auto-retry on authentication failures');
@@ -1128,51 +1463,9 @@ app.listen(PORT, () => {
   console.log('  📊 Activity tracking and analytics');
   console.log('  💻 Computer/device information');
   console.log('  📈 Productivity statistics');
-  console.log('\n📚 NEW SCREENSHOT MONITORING ENDPOINTS:');
-  console.log('  🔍 GET  /api/monitorUser/:userId?includeScreenshots=true');
-  console.log('      - Complete monitoring + actual screenshot images');
-  console.log('      - EXTREME PRIVACY IMPACT - Use with caution');
-  console.log('  👥 GET  /api/monitorAllUsers?includeScreenshots=true');
-  console.log('      - Monitor ALL users + screenshot images');
-  console.log('      - MAXIMUM PRIVACY IMPACT - Requires all consents');
-  console.log('  📸 GET  /api/getScreenshotsWithImages/:userId');
-  console.log('      - Screenshot images only for specific user');
-  console.log('      - Contains visual data of user\'s screen');
-  console.log('\n📚 Standard endpoints:');
-  console.log('  - GET  /api/health');
-  console.log('  - GET  /api/auth/status (check token validity)');
-  console.log('  - POST /api/auth/refresh (force new token)');
-  console.log('  🧑‍💼 User Management:');
-  console.log('    - GET  /api/getUsers');
-  console.log('    - GET  /api/getManagedUsers');
-  console.log('    - GET  /api/getUser/:userId');
-  console.log('    - PUT  /api/putUser/:userId');
-  console.log('    - DELETE /api/deleteUser/:userId');
-  console.log('    - POST /api/invite');
-  console.log('  📋 Task Management:');
-  console.log('    - GET  /api/getTasks');
-  console.log('    - GET  /api/tasks');
-  console.log('    - POST /api/newTask');
-  console.log('    - GET  /api/task/:taskId');
-  console.log('  📊 Activity & Analytics:');
-  console.log('    - GET  /api/getActivityWorklog');
-  console.log('    - GET  /api/getActivityTimeuse');
-  console.log('    - GET  /api/timeuseStats');
-  console.log('    - GET  /api/getDisconnectivity');
-  console.log('    - GET  /api/stats1_total');
-  console.log('  📁 File Management:');
-  console.log('    - GET  /api/getFiles');
-  console.log('    - DELETE /api/deleteFiles');
-  console.log('    - GET  /api/getTypeFiles/:fileType');
-  console.log('    - PUT  /api/putFile/:fileId');
-  console.log('    - DELETE /api/deleteFile/:fileId');
-  console.log('  ⏱️  Time Tracking:');
-  console.log('    - GET  /api/getWorkLogs');
-  console.log('    - GET  /api/getScreenshots (metadata only)');
-  console.log('    - GET  /api/getTimeTracking');
   console.log('\n✅ Server is ready to accept requests!');
   console.log('🔄 Tokens will automatically refresh when expired');
-  console.log('📸 SCREENSHOT MONITORING: Use with EXTREME caution and legal compliance!');
+  console.log('📤 n8n sync will run automatically every 5 minutes');
   console.log('🚨 Remember: Screenshots show everything on user screens - handle responsibly!\n');
 });
 
