@@ -17,5 +17,5 @@ console.log('https://n8n.srv470812.hstgr.cloud/webhook-test/workspace-url-n8n');
 console.log('\n🎯 Result: ONE clean n8n execution with ALL users inside!');
 console.log('🎉 No more ugly individual webhook calls!');
 
-// Load the single call server
-require('./src/single-call-server.js');
+// Load the updated batch server (now sends single JSON payload)
+require('./src/batch-server.js');
