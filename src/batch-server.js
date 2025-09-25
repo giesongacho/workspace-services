@@ -8,12 +8,12 @@ const config = require('./config');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// 🔗 FIXED WEBHOOK URL - Use the original working webhook
+// 🔗 WEBHOOK URL
 const N8N_WEBHOOK_URL = process.env.N8N_WEBHOOK_URL || 'https://n8n.srv470812.hstgr.cloud/webhook/workspace-url-n8n';
 
 // 🎯 SINGLE SEND CONFIGURATION
-const SEND_ONCE_ON_STARTUP = true; // Send all users in ONE call on startup
-const SEND_RECURRING = false; // No recurring sends
+const SEND_ONCE_ON_STARTUP = true;
+const SEND_RECURRING = false;
 
 // Middleware
 app.use(cors());
@@ -29,237 +29,140 @@ app.use((req, res, next) => {
   next();
 });
 
-// ==================== USER LOOKUP FUNCTION ====================
+// ==================== ONE SINGLE WEBHOOK CALL ====================
 
-async function getRealUsername(userId) {
-  console.log(`🔍 Getting real username for: ${userId}`);
-  
+/**
+ * 🎯 SEND ALL USERS IN ONE SINGLE WEBHOOK CALL - NO INDIVIDUAL CALLS!
+ */
+async function sendAllUsersInOneCall() {
   try {
+    console.log('\n🚀 [ONE CALL] Collecting ALL users for ONE single webhook...');
+    
+    // Get all users with real names
     const allUsers = await api.getUsers({ limit: 1000, detail: 'extended' });
     
     if (!allUsers.data || allUsers.data.length === 0) {
-      return { name: 'Unknown User', email: 'Email not available', success: false };
-    }
-    
-    const matchedUser = allUsers.data.find(user => user.id === userId);
-    
-    if (matchedUser) {
-      const realName = matchedUser.name || 
-                      matchedUser.displayName || 
-                      matchedUser.fullName || 
-                      matchedUser.username ||
-                      `${matchedUser.firstName || ''} ${matchedUser.lastName || ''}`.trim() ||
-                      matchedUser.email?.split('@')[0] ||
-                      'Unknown User';
-      
-      const realEmail = matchedUser.email || 'Email not available';
-      
-      console.log(`✅ Found real name: "${realName}" for user ${userId}`);
-      
-      return {
-        name: realName,
-        email: realEmail,
-        timezone: matchedUser.timezone,
-        role: matchedUser.role,
-        success: true
-      };
-    } else {
-      console.log(`❌ User ${userId} not found in user list`);
-      return { 
-        name: `User ${userId.substring(0, 8)}`, 
-        email: 'Email not available', 
-        success: false 
-      };
-    }
-  } catch (error) {
-    console.error(`❌ Error looking up user ${userId}: ${error.message}`);
-    return { 
-      name: `User ${userId.substring(0, 8)}`, 
-      email: 'Email not available', 
-      success: false 
-    };
-  }
-}
-
-// ==================== SINGLE WEBHOOK FUNCTION ====================
-
-/**
- * 🎯 SEND ALL USERS IN ONE SINGLE JSON PAYLOAD TO WEBHOOK
- * This sends ONE webhook call with ALL users wrapped inside
- */
-async function sendAllUsersInSingleCall() {
-  try {
-    console.log('\n🚀 [SINGLE CALL] Starting to collect ALL users for ONE webhook call...');
-    
-    // Get monitoring data for all users
-    const allMonitoringData = await api.getAllUsersMonitoring({
-      from: new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString().split('T')[0],
-      to: new Date().toISOString().split('T')[0]
-    });
-
-    if (!allMonitoringData.success || !allMonitoringData.data) {
-      console.log('⚠️ No monitoring data available');
+      console.log('❌ No users found');
       return;
     }
 
-    console.log(`📊 [SINGLE CALL] Processing ${allMonitoringData.data.length} users for ONE webhook...`);
+    console.log(`📊 [ONE CALL] Found ${allUsers.data.length} users to send in ONE call`);
     
-    // Process all users and collect their data
-    const allUsersData = [];
-    
-    for (const userData of allMonitoringData.data) {
-      console.log(`🔍 [SINGLE CALL] Processing user: ${userData.userId}`);
+    // Process all users into one array
+    const processedUsers = allUsers.data.map(user => {
+      const realName = user.name || 
+                      user.displayName || 
+                      user.fullName || 
+                      user.username ||
+                      user.email?.split('@')[0] ||
+                      'Unknown User';
       
-      // Get real username
-      const userLookup = await getRealUsername(userData.userId);
+      console.log(`✅ [ONE CALL] Adding "${realName}" to single payload`);
       
-      // Prepare user data
-      const userInfo = {
-        // 👤 REAL USER IDENTIFICATION
-        name: userLookup.name,
-        email: userLookup.email,
-        userId: userData.userId,
-        realName: userLookup.name,
-        realEmail: userLookup.email,
-        timezone: userLookup.timezone || 'Unknown',
-        role: userLookup.role || 'Unknown',
-        lookupSuccess: userLookup.success,
-        
-        // 📊 MONITORING DATA
-        hasData: userData.summary?.hasData || false,
-        totalActivities: userData.activitySummary?.totalRecords || 0,
-        totalScreenshots: userData.screenshots?.totalScreenshots || 0,
-        totalDisconnections: userData.disconnectionEvents?.totalEvents || 0,
-        
-        // 📝 DETAILED DATA
-        activities: userData.activitySummary?.data || [],
-        screenshots: userData.screenshots?.data || [],
-        timeUsage: userData.timeUsage?.data || [],
-        disconnections: userData.disconnectionEvents?.data || [],
-        
-        // 📅 DATE RANGE
-        dateRange: userData.dateRange,
+      return {
+        name: realName,
+        email: user.email || 'Email not available',
+        userId: user.id,
+        realName: realName,
+        realEmail: user.email || 'Email not available',
+        timezone: user.timezone || 'Unknown',
+        role: user.role || 'Unknown',
+        status: user.status || 'Unknown',
         processedAt: new Date().toISOString()
       };
-      
-      allUsersData.push(userInfo);
-      console.log(`✅ [SINGLE CALL] Added "${userLookup.name}" to batch`);
-      
-      // Small delay to avoid overwhelming API
-      await new Promise(resolve => setTimeout(resolve, 200));
-    }
+    });
 
-    // 🎯 CREATE SINGLE JSON PAYLOAD WITH ALL USERS
-    const singleJsonPayload = {
-      // 📊 BATCH METADATA
+    // 🎯 CREATE ONE SINGLE JSON PAYLOAD WITH ALL USERS
+    const oneJsonPayload = {
       batchInfo: {
-        type: 'ALL_USERS_BATCH',
-        totalUsers: allUsersData.length,
+        type: 'ALL_USERS_IN_ONE_CALL',
+        totalUsers: processedUsers.length,
         timestamp: new Date().toISOString(),
         source: 'timekeeper-workspace-services',
         webhookUrl: N8N_WEBHOOK_URL,
-        description: 'All TimeDoctor users data in ONE single webhook call'
+        description: 'ALL users in ONE single webhook call - NO individual calls!'
       },
       
-      // 👥 ALL USERS ARRAY - THIS IS WHAT YOU WANT!
-      allUsers: allUsersData,
+      // 👥 ALL USERS IN ONE ARRAY
+      allUsers: processedUsers,
       
-      // 📈 SUMMARY STATISTICS
+      // 📈 SUMMARY
       summary: {
-        totalUsers: allUsersData.length,
-        usersWithRealNames: allUsersData.filter(u => u.lookupSuccess).length,
-        usersWithData: allUsersData.filter(u => u.hasData).length,
-        totalActivities: allUsersData.reduce((sum, u) => sum + u.totalActivities, 0),
-        totalScreenshots: allUsersData.reduce((sum, u) => sum + u.totalScreenshots, 0),
-        realNamesFound: allUsersData.filter(u => u.lookupSuccess).map(u => u.name),
+        totalUsers: processedUsers.length,
+        realNamesFound: processedUsers.map(u => u.name),
         generatedAt: new Date().toISOString()
       }
     };
 
-    console.log('\n🎯 [SINGLE CALL] Sending ALL users in ONE JSON payload...');
-    console.log(`📊 Total users in payload: ${allUsersData.length}`);
-    console.log(`✅ Real names: ${singleJsonPayload.summary.realNamesFound.join(', ')}`);
-    console.log(`🔗 FIXED Webhook URL: ${N8N_WEBHOOK_URL}`);
+    console.log('\n📤 [ONE CALL] Sending ALL users in ONE single webhook call...');
+    console.log(`📊 Total users: ${processedUsers.length}`);
+    console.log(`✅ Names: ${oneJsonPayload.summary.realNamesFound.join(', ')}`);
+    console.log(`🔗 Webhook: ${N8N_WEBHOOK_URL}`);
+    console.log('🎯 THIS IS ONE CALL - NOT INDIVIDUAL CALLS!');
     
-    // 🚀 SEND SINGLE WEBHOOK CALL WITH ALL USERS
+    // 🚀 SEND ONE SINGLE WEBHOOK CALL
     const response = await fetch(N8N_WEBHOOK_URL, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'User-Agent': 'Workspace-Services-Single-Call/1.0'
+        'User-Agent': 'Workspace-Services-One-Call/1.0'
       },
-      body: JSON.stringify(singleJsonPayload),
+      body: JSON.stringify(oneJsonPayload),
       timeout: 30000
     });
 
-    console.log(`📡 Webhook response: ${response.status} ${response.statusText}`);
+    console.log(`📡 Response: ${response.status} ${response.statusText}`);
 
     if (response.ok) {
-      console.log('\n✅ [SINGLE CALL] SUCCESS!');
-      console.log(`🎉 Sent ALL ${allUsersData.length} users in ONE webhook call!`);
-      console.log(`🎯 Your n8n received ONE execution with ALL users wrapped inside!`);
-      console.log(`📋 No more individual calls - just ONE clean JSON payload!`);
+      console.log('\n✅ [ONE CALL] SUCCESS!');
+      console.log(`🎉 Sent ALL ${processedUsers.length} users in ONE webhook call!`);
+      console.log(`🎯 Your n8n will show ONE execution, not individual calls!`);
       return true;
     } else {
       const errorText = await response.text().catch(() => 'Unable to read response');
-      console.error(`❌ [SINGLE CALL] FAILED: ${response.status} ${response.statusText}`);
+      console.error(`❌ [ONE CALL] FAILED: ${response.status} ${response.statusText}`);
       console.error(`❌ Error: ${errorText}`);
       return false;
     }
     
   } catch (error) {
-    console.error(`❌ [SINGLE CALL] Error: ${error.message}`);
+    console.error(`❌ [ONE CALL] Error: ${error.message}`);
     return false;
   }
 }
 
 // ==================== API ENDPOINTS ====================
 
-/**
- * @route   GET /api/health
- * @desc    Health check - shows single call configuration
- */
 app.get('/api/health', (req, res) => {
   res.json({
     status: 'ok',
-    message: 'TimeDoctor API Server - SINGLE WEBHOOK CALL FOR ALL USERS',
+    message: 'TimeDoctor API Server - ONE SINGLE WEBHOOK CALL',
     timestamp: new Date().toISOString(),
     configuration: {
       webhookUrl: N8N_WEBHOOK_URL,
-      sendMode: 'SINGLE CALL - All users wrapped in ONE JSON payload',
+      sendMode: 'ONE CALL - All users in single payload',
       sendOnce: SEND_ONCE_ON_STARTUP,
-      recurringCalls: SEND_RECURRING,
-      description: 'No more individual user calls - ALL users sent in ONE webhook'
-    },
-    webhookPayloadStructure: {
-      batchInfo: 'Metadata about the batch',
-      allUsers: 'Array containing ALL users data',
-      summary: 'Aggregate statistics'
+      description: 'NO individual calls - ALL users sent in ONE webhook'
     }
   });
 });
 
-/**
- * @route   POST /api/sync/now
- * @desc    Manually trigger single call with ALL users
- */
 app.post('/api/sync/now', async (req, res) => {
   try {
-    console.log('🚀 [MANUAL] Manual single call trigger...');
+    console.log('🚀 [MANUAL] Manual ONE CALL trigger...');
     
-    // Run single call in background
-    sendAllUsersInSingleCall().then(() => {
-      console.log('✅ [MANUAL] Background single call completed');
+    sendAllUsersInOneCall().then(() => {
+      console.log('✅ [MANUAL] ONE CALL completed');
     }).catch(error => {
-      console.error('❌ [MANUAL] Background single call failed:', error.message);
+      console.error('❌ [MANUAL] ONE CALL failed:', error.message);
     });
     
     res.json({
       success: true,
-      message: 'Single call with ALL users started',
-      description: 'ALL users will be sent in ONE webhook call (not individual calls)',
+      message: 'ONE CALL with ALL users started',
+      description: 'ALL users will be sent in ONE webhook call',
       webhookUrl: N8N_WEBHOOK_URL,
-      note: 'Check your n8n - you will see ONE execution with ALL users inside'
+      note: 'Check your n8n - you will see ONE execution only'
     });
     
   } catch (error) {
@@ -270,14 +173,8 @@ app.post('/api/sync/now', async (req, res) => {
   }
 });
 
-/**
- * @route   GET /api/debug/allUsers
- * @desc    See all users that will be sent in single call
- */
 app.get('/api/debug/allUsers', async (req, res) => {
   try {
-    console.log('📊 [DEBUG] Fetching all users...');
-    
     const allUsers = await api.getUsers({ limit: 1000, detail: 'extended' });
     
     if (!allUsers.data) {
@@ -291,24 +188,17 @@ app.get('/api/debug/allUsers', async (req, res) => {
     const userList = allUsers.data.map(user => ({
       userId: user.id,
       name: user.name || 'NO NAME',
-      email: user.email || 'NO EMAIL',
-      finalName: user.name || 
-               user.displayName || 
-               user.fullName || 
-               user.username ||
-               user.email?.split('@')[0] ||
-               'Unknown User'
+      email: user.email || 'NO EMAIL'
     }));
     
     res.json({
       success: true,
-      message: `Found ${userList.length} users that will be sent in SINGLE webhook call`,
+      message: `Found ${userList.length} users - will send in ONE call`,
       totalUsers: userList.length,
       data: userList,
       webhookInfo: {
         url: N8N_WEBHOOK_URL,
-        method: 'SINGLE CALL - All users in ONE JSON payload',
-        description: 'These users will be wrapped in ONE webhook call'
+        method: 'ONE CALL - All users in single payload'
       }
     });
     
@@ -324,12 +214,7 @@ app.get('/api/debug/allUsers', async (req, res) => {
 app.use((req, res) => {
   res.status(404).json({
     success: false,
-    error: 'Endpoint not found',
-    availableEndpoints: [
-      'GET /api/health - Server health and single call configuration',
-      'GET /api/debug/allUsers - See all users that will be sent',
-      'POST /api/sync/now - Manually send ALL users in single call'
-    ]
+    error: 'Endpoint not found'
   });
 });
 
@@ -346,47 +231,33 @@ app.use((err, req, res, next) => {
 // ==================== START SERVER ====================
 
 app.listen(PORT, () => {
-  console.log('\n🚀 TimeDoctor API Server - SINGLE WEBHOOK CALL FOR ALL USERS');
-  console.log('===============================================================');
+  console.log('\n🚀 TimeDoctor API Server - ONE SINGLE WEBHOOK CALL');
+  console.log('==================================================');
   console.log(`📡 Server: http://localhost:${PORT}`);
   console.log(`📧 Email: ${config.credentials.email}`);
   console.log(`🏢 Company: ${config.credentials.companyName}`);
-  console.log('\n🎯 SINGLE CALL CONFIGURATION:');
-  console.log('=============================');
-  console.log('✅ ALL users wrapped in ONE JSON payload');
-  console.log('✅ ONE webhook call (not individual calls)'); 
-  console.log('✅ Real usernames like "Richard Edwards", "Theo Bagwell"');
-  console.log('✅ Sent ONCE on startup (not recurring)');
-  console.log('\n🔗 WEBHOOK TARGET:');
-  console.log('==================');
-  console.log(`🎯 FIXED URL: ${N8N_WEBHOOK_URL}`);
-  console.log('📊 Payload: ONE JSON with ALL users inside');
-  console.log('🎉 Result: Clean n8n execution (no spam!)');
-  console.log('\n🔍 TEST COMMANDS:');
-  console.log('================');
-  console.log('1. Check config: GET  /api/health');  
-  console.log('2. See all users: GET /api/debug/allUsers');
-  console.log('3. Manual single call: POST /api/sync/now');
-  console.log('\n✅ SINGLE CALL BENEFITS:');
-  console.log('========================');
-  console.log('✅ No more ugly individual webhook calls');
-  console.log('✅ One clean JSON payload with ALL users');
-  console.log('✅ Easy to process in n8n with $json.allUsers');
-  console.log('✅ Real usernames: Richard Edwards, Theo Bagwell, etc.');
+  console.log('\n🎯 ONE CALL CONFIGURATION:');
+  console.log('==========================');
+  console.log('✅ ALL users in ONE JSON payload');
+  console.log('✅ ONE webhook call (NO individual calls)'); 
+  console.log('✅ Real usernames from TimeDoctor');
+  console.log('✅ Sent ONCE on startup');
+  console.log('\n🔗 WEBHOOK:');
+  console.log('===========');
+  console.log(`🎯 URL: ${N8N_WEBHOOK_URL}`);
+  console.log('📊 Format: ONE JSON with ALL users');
+  console.log('🎉 Result: ONE n8n execution only');
   
-  // 🚀 Send all users in single call on startup
+  // 🚀 Send ONE call on startup
   if (SEND_ONCE_ON_STARTUP) {
     setTimeout(() => {
-      console.log('\n🚀 [STARTUP] Sending ALL users in ONE webhook call...');
-      console.log('🎯 This will be ONE clean execution in your n8n!');
-      console.log('📋 All 11 users wrapped in single JSON payload!');
-      sendAllUsersInSingleCall();
+      console.log('\n🚀 [STARTUP] Sending ONE webhook call with ALL users...');
+      console.log('🎯 This will be ONE execution in your n8n!');
+      sendAllUsersInOneCall();
     }, 10000);
-  } else {
-    console.log('\n⏸️ Startup call disabled. Use POST /api/sync/now to trigger manually');
   }
   
-  console.log('\n🎉 Server ready! ALL users will be sent in ONE beautiful JSON payload!');
+  console.log('\n🎉 Server ready! ONE webhook call coming up!');
 });
 
 module.exports = app;
