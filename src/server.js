@@ -27,6 +27,214 @@ app.use((req, res, next) => {
   next();
 });
 
+// ==================== ENHANCED COMPUTER NAME ENDPOINTS ====================
+
+/**
+ * @route   GET /api/getRealComputerName/:userId
+ * @desc    Get the REAL computer name (like "Macbooks-MacBook-Air.local") for a user
+ * @param   userId - User ID to lookup
+ */
+app.get('/api/getRealComputerName/:userId', async (req, res) => {
+  try {
+    const userId = req.params.userId;
+    
+    if (!userId || userId === 'undefined') {
+      return res.status(400).json({
+        success: false,
+        error: 'User ID is required',
+        example: 'GET /api/getRealComputerName/aLfYIu7-TthUmwrm'
+      });
+    }
+
+    console.log(`🖥️ REAL computer name lookup requested for: ${userId}`);
+    
+    // Get enhanced device information
+    const enhancedDeviceInfo = await api.getEnhancedDeviceInfo(userId);
+    
+    const response = {
+      userId: userId,
+      success: enhancedDeviceInfo.realNameFound,
+      realComputerName: enhancedDeviceInfo.realComputerName,
+      hostname: enhancedDeviceInfo.hostname,
+      deviceType: enhancedDeviceInfo.deviceType,
+      operatingSystem: enhancedDeviceInfo.operatingSystem,
+      ipAddress: enhancedDeviceInfo.ipAddress,
+      lookupMethod: enhancedDeviceInfo.lookupMethod,
+      confidenceLevel: enhancedDeviceInfo.confidenceLevel,
+      fallbackName: enhancedDeviceInfo.patternDeviceName,
+      finalComputerName: enhancedDeviceInfo.finalComputerName,
+      lastSeen: enhancedDeviceInfo.lastSeen,
+      error: enhancedDeviceInfo.error,
+      
+      // Debug information
+      debug: {
+        strategies: [
+          '1. User details lookup',
+          '2. Activity records lookup',
+          '3. Screenshot metadata lookup', 
+          '4. Worklog records lookup',
+          '5. Session/connection info lookup'
+        ],
+        actualLookupMethod: enhancedDeviceInfo.lookupMethod,
+        realNameFound: enhancedDeviceInfo.realNameFound,
+        recommendation: enhancedDeviceInfo.realNameFound 
+          ? `✅ SUCCESS: Real computer name found: ${enhancedDeviceInfo.realComputerName}`
+          : `⚠️ FALLBACK: Using pattern-based name: ${enhancedDeviceInfo.finalComputerName}`
+      }
+    };
+    
+    if (enhancedDeviceInfo.realNameFound) {
+      console.log(`✅ REAL computer name found: ${enhancedDeviceInfo.realComputerName} (${enhancedDeviceInfo.lookupMethod})`);
+    } else {
+      console.log(`⚠️ Using fallback: ${enhancedDeviceInfo.finalComputerName} (${enhancedDeviceInfo.lookupMethod})`);
+    }
+    
+    res.json({
+      success: true,
+      message: `Computer name lookup completed for ${userId}`,
+      data: response
+    });
+    
+  } catch (error) {
+    console.error(`❌ REAL computer name lookup error for ${req.params.userId}:`, error.message);
+    res.status(500).json({
+      success: false,
+      error: error.message,
+      userId: req.params.userId,
+      message: 'Failed to get real computer name'
+    });
+  }
+});
+
+/**
+ * @route   GET /api/getAllRealComputerNames
+ * @desc    Get REAL computer names for ALL users in the company
+ */
+app.get('/api/getAllRealComputerNames', async (req, res) => {
+  try {
+    console.log('🖥️ Getting REAL computer names for ALL users...');
+    
+    // Get all users first
+    const users = await api.getUsers({ limit: 1000 });
+    const userList = users.data || [];
+    
+    if (userList.length === 0) {
+      return res.json({
+        success: true,
+        message: 'No users found in company',
+        data: {
+          totalUsers: 0,
+          realNamesFound: 0,
+          users: []
+        }
+      });
+    }
+
+    console.log(`📊 Found ${userList.length} users to check for real computer names`);
+    
+    const allComputerNames = [];
+    let realNamesFound = 0;
+    
+    // Check each user for real computer name
+    for (const user of userList) {
+      try {
+        console.log(`🔍 Checking real computer name for user ${user.id}...`);
+        
+        const enhancedInfo = await api.getEnhancedDeviceInfo(user.id, user);
+        
+        const userComputerInfo = {
+          userId: user.id,
+          userName: user.name || 'Unknown User',
+          userEmail: user.email || 'Unknown Email',
+          
+          // Computer name information
+          realComputerName: enhancedInfo.realComputerName,
+          hostname: enhancedInfo.hostname,
+          deviceType: enhancedInfo.deviceType,
+          operatingSystem: enhancedInfo.operatingSystem,
+          ipAddress: enhancedInfo.ipAddress,
+          finalComputerName: enhancedInfo.finalComputerName,
+          
+          // Lookup metadata
+          lookupMethod: enhancedInfo.lookupMethod,
+          realNameFound: enhancedInfo.realNameFound,
+          confidenceLevel: enhancedInfo.confidenceLevel,
+          lastSeen: enhancedInfo.lastSeen,
+          
+          // Status
+          status: enhancedInfo.realNameFound ? '✅ REAL NAME FOUND' : '⚠️ USING FALLBACK',
+          displayName: enhancedInfo.realNameFound 
+            ? `${enhancedInfo.realComputerName} (REAL)`
+            : `${enhancedInfo.finalComputerName} (Fallback)`
+        };
+        
+        if (enhancedInfo.realNameFound) {
+          realNamesFound++;
+          console.log(`  ✅ REAL: ${enhancedInfo.realComputerName} (${enhancedInfo.lookupMethod})`);
+        } else {
+          console.log(`  ⚠️ Fallback: ${enhancedInfo.finalComputerName}`);
+        }
+        
+        allComputerNames.push(userComputerInfo);
+        
+        // Small delay to avoid overwhelming the API
+        await new Promise(resolve => setTimeout(resolve, 100));
+        
+      } catch (error) {
+        console.error(`❌ Failed to get computer name for user ${user.id}: ${error.message}`);
+        allComputerNames.push({
+          userId: user.id,
+          userName: user.name || 'Unknown User',
+          userEmail: user.email || 'Unknown Email',
+          realComputerName: null,
+          finalComputerName: 'Error getting computer name',
+          lookupMethod: 'error',
+          realNameFound: false,
+          confidenceLevel: 'none',
+          status: '❌ ERROR',
+          error: error.message
+        });
+      }
+    }
+
+    // Sort by real names found first, then by computer name
+    allComputerNames.sort((a, b) => {
+      if (a.realNameFound && !b.realNameFound) return -1;
+      if (!a.realNameFound && b.realNameFound) return 1;
+      return (a.finalComputerName || '').localeCompare(b.finalComputerName || '');
+    });
+
+    console.log(`✅ Computer name lookup complete for all users`);
+    console.log(`   👥 Total users: ${allComputerNames.length}`);
+    console.log(`   🖥️ REAL computer names found: ${realNamesFound}`);
+    console.log(`   📊 Success rate: ${Math.round((realNamesFound / allComputerNames.length) * 100)}%`);
+
+    res.json({
+      success: true,
+      message: `Computer name lookup completed for all ${allComputerNames.length} users`,
+      data: {
+        totalUsers: allComputerNames.length,
+        realNamesFound: realNamesFound,
+        successRate: `${Math.round((realNamesFound / allComputerNames.length) * 100)}%`,
+        summary: {
+          realComputerNames: allComputerNames.filter(u => u.realNameFound),
+          fallbackNames: allComputerNames.filter(u => !u.realNameFound && !u.error),
+          errors: allComputerNames.filter(u => u.error)
+        },
+        users: allComputerNames
+      }
+    });
+    
+  } catch (error) {
+    console.error('❌ Error getting all real computer names:', error.message);
+    res.status(500).json({
+      success: false,
+      error: error.message,
+      message: 'Failed to get real computer names for all users'
+    });
+  }
+});
+
 // ==================== N8N USER LOOKUP HELPERS ====================
 
 /**
@@ -163,16 +371,47 @@ app.get('/api/debug/userLookup/:userId', async (req, res) => {
       };
       debugInfo.debugSteps.push(`❌ Direct lookup: FAILED - ${directError.message}`);
     }
+
+    // NEW Step 4: Try enhanced computer name lookup
+    debugInfo.debugSteps.push('Step 4: Attempting REAL computer name lookup...');
+    try {
+      const enhancedDeviceInfo = await api.getEnhancedDeviceInfo(userId);
+      debugInfo.computerNameLookup = {
+        success: enhancedDeviceInfo.realNameFound,
+        realComputerName: enhancedDeviceInfo.realComputerName,
+        hostname: enhancedDeviceInfo.hostname,
+        lookupMethod: enhancedDeviceInfo.lookupMethod,
+        confidenceLevel: enhancedDeviceInfo.confidenceLevel,
+        finalComputerName: enhancedDeviceInfo.finalComputerName,
+        error: enhancedDeviceInfo.error
+      };
+      
+      if (enhancedDeviceInfo.realNameFound) {
+        debugInfo.debugSteps.push(`✅ REAL computer name: ${enhancedDeviceInfo.realComputerName} (${enhancedDeviceInfo.lookupMethod})`);
+      } else {
+        debugInfo.debugSteps.push(`⚠️ Using fallback: ${enhancedDeviceInfo.finalComputerName}`);
+      }
+    } catch (computerError) {
+      debugInfo.computerNameLookup = {
+        success: false,
+        error: computerError.message
+      };
+      debugInfo.debugSteps.push(`❌ Computer name lookup: FAILED - ${computerError.message}`);
+    }
     
-    // Final diagnosis
+    // Final diagnosis (UPDATED to include computer name info)
     if (debugInfo.userFound && debugInfo.matchedUser.name !== 'NO NAME') {
       debugInfo.diagnosis = 'SUCCESS: User can be identified for monitoring';
       debugInfo.monitoringName = debugInfo.matchedUser.name;
       debugInfo.monitoringEmail = debugInfo.matchedUser.email;
+    } else if (debugInfo.computerNameLookup?.success) {
+      debugInfo.diagnosis = 'SUCCESS: User identified via REAL computer name';
+      debugInfo.monitoringName = debugInfo.computerNameLookup.realComputerName;
+      debugInfo.monitoringEmail = debugInfo.matchedUser?.email || 'Email not available';
     } else if (debugInfo.userFound) {
-      debugInfo.diagnosis = 'PARTIAL: User found but missing name/email data - will use device name extraction';
-      debugInfo.monitoringName = `Tthumwrm`;  // Extracted from Computer-TthUmwrm
-      debugInfo.monitoringEmail = 'tthumwrm@company.com';
+      debugInfo.diagnosis = 'PARTIAL: User found but missing name/email data - using device name extraction';
+      debugInfo.monitoringName = debugInfo.computerNameLookup?.finalComputerName || `User ${userId.slice(0, 8)}`;
+      debugInfo.monitoringEmail = debugInfo.matchedUser?.email || 'Email not available';
     } else {
       debugInfo.diagnosis = 'FAILED: Cannot identify user for monitoring';
       debugInfo.monitoringName = 'Unknown User';
@@ -303,50 +542,79 @@ async function sendUserDataToN8N(userData) {
               
               console.log(`✅ Strategy 2 SUCCESS: Found in user list: ${realUserName} (${realUserEmail})`);
             } else {
-              console.log(`⚠️ Strategy 2: User ${userId} found but no name/email, trying device name extraction`);
+              console.log(`⚠️ Strategy 2: User ${userId} found but no name/email, trying enhanced computer name lookup`);
               
-              // STRATEGY 3: Use device name or create identifier
-              const deviceName = userData.userInfo?.name || userData.deviceName || 'Unknown Device';
-              
-              // Enhanced device name extraction for patterns like "Computer-TthUmwrm"
-              if (deviceName && deviceName !== 'Unknown Device') {
-                // Try to extract name from device patterns
-                let nameMatch = deviceName.match(/(?:Computer-|DESKTOP-|PC-)([A-Za-z]+)/i);
+              // STRATEGY 3: Use enhanced computer name lookup
+              try {
+                const enhancedDeviceInfo = await api.getEnhancedDeviceInfo(userId);
                 
-                // ENHANCED: Also try to extract from alphanumeric patterns like "Computer-TthUmwrm"
-                if (!nameMatch) {
-                  nameMatch = deviceName.match(/(?:Computer-|DESKTOP-|PC-)([A-Za-z0-9]+)/i);
-                }
-                
-                if (nameMatch) {
-                  let extractedName = nameMatch[1];
+                if (enhancedDeviceInfo.realNameFound && enhancedDeviceInfo.realComputerName) {
+                  // Extract user name from computer name if possible
+                  let extractedName = enhancedDeviceInfo.realComputerName;
                   
-                  // Clean up the extracted name
-                  if (extractedName.length >= 3) {
-                    // For "TthUmwrm" -> "Tthumwrm"
-                    realUserName = extractedName.charAt(0).toUpperCase() + extractedName.slice(1).toLowerCase();
-                    realUserEmail = `${extractedName.toLowerCase()}@company.com`;
-                    lookupMethod = 'device_name_extraction';
-                    console.log(`✅ Strategy 3: Extracted from device name: ${realUserName} from ${deviceName}`);
-                  } else {
-                    // Name too short, use full device name
-                    realUserName = `User of ${deviceName}`;
-                    realUserEmail = `user.${deviceName.replace(/[^a-zA-Z0-9]/g, '').toLowerCase()}@company.com`;
-                    lookupMethod = 'device_name_fallback';
-                    console.log(`✅ Strategy 3: Using device name: ${realUserName}`);
+                  // Try to extract a user name from computer names like "Johns-MacBook-Pro.local"
+                  const nameMatch = extractedName.match(/^([A-Za-z]+)[s']?[-\s]/);
+                  if (nameMatch) {
+                    extractedName = nameMatch[1];
                   }
+                  
+                  realUserName = extractedName;
+                  realUserEmail = `${extractedName.toLowerCase().replace(/[^a-z0-9]/g, '')}@company.com`;
+                  lookupMethod = 'enhanced_computer_name';
+                  
+                  console.log(`✅ Strategy 3: Extracted from REAL computer name: ${realUserName} from ${enhancedDeviceInfo.realComputerName}`);
                 } else {
-                  realUserName = `User of ${deviceName}`;
-                  realUserEmail = `user.${deviceName.replace(/[^a-zA-Z0-9]/g, '').toLowerCase()}@company.com`;
-                  lookupMethod = 'device_name_fallback';
-                  console.log(`✅ Strategy 3: Using full device name: ${realUserName}`);
+                  // Fall back to pattern-based device name
+                  const deviceName = userData.userInfo?.name || userData.deviceName || 'Unknown Device';
+                  
+                  // Enhanced device name extraction for patterns like "Computer-TthUmwrm"
+                  if (deviceName && deviceName !== 'Unknown Device') {
+                    // Try to extract name from device patterns
+                    let nameMatch = deviceName.match(/(?:Computer-|DESKTOP-|PC-)([A-Za-z]+)/i);
+                    
+                    // ENHANCED: Also try to extract from alphanumeric patterns like "Computer-TthUmwrm"
+                    if (!nameMatch) {
+                      nameMatch = deviceName.match(/(?:Computer-|DESKTOP-|PC-)([A-Za-z0-9]+)/i);
+                    }
+                    
+                    if (nameMatch) {
+                      let extractedName = nameMatch[1];
+                      
+                      // Clean up the extracted name
+                      if (extractedName.length >= 3) {
+                        // For "TthUmwrm" -> "Tthumwrm"
+                        realUserName = extractedName.charAt(0).toUpperCase() + extractedName.slice(1).toLowerCase();
+                        realUserEmail = `${extractedName.toLowerCase()}@company.com`;
+                        lookupMethod = 'device_name_extraction';
+                        console.log(`✅ Strategy 3b: Extracted from device name: ${realUserName} from ${deviceName}`);
+                      } else {
+                        // Name too short, use full device name
+                        realUserName = `User of ${deviceName}`;
+                        realUserEmail = `user.${deviceName.replace(/[^a-zA-Z0-9]/g, '').toLowerCase()}@company.com`;
+                        lookupMethod = 'device_name_fallback';
+                        console.log(`✅ Strategy 3b: Using device name: ${realUserName}`);
+                      }
+                    } else {
+                      realUserName = `User of ${deviceName}`;
+                      realUserEmail = `user.${deviceName.replace(/[^a-zA-Z0-9]/g, '').toLowerCase()}@company.com`;
+                      lookupMethod = 'device_name_fallback';
+                      console.log(`✅ Strategy 3b: Using full device name: ${realUserName}`);
+                    }
+                  } else {
+                    // STRATEGY 4: Use userId as identifier
+                    realUserName = `User ${userId.substring(0, 8)}`;
+                    realUserEmail = `user.${userId.substring(0, 8)}@company.com`;
+                    lookupMethod = 'userid_fallback';
+                    console.log(`✅ Strategy 4: Using userId fallback: ${realUserName}`);
+                  }
                 }
-              } else {
-                // STRATEGY 4: Use userId as identifier
-                realUserName = `User ${userId.substring(0, 8)}`;
-                realUserEmail = `user.${userId.substring(0, 8)}@company.com`;
-                lookupMethod = 'userid_fallback';
-                console.log(`✅ Strategy 4: Using userId fallback: ${realUserName}`);
+              } catch (enhancedError) {
+                console.error(`⚠️ Enhanced computer name lookup failed: ${enhancedError.message}`);
+                // Fall back to previous logic
+                const deviceName = userData.userInfo?.name || userData.deviceName || 'Unknown Device';
+                realUserName = `User of ${deviceName}`;
+                realUserEmail = `user@company.com`;
+                lookupMethod = 'final_fallback';
               }
             }
           } else {
@@ -423,6 +691,7 @@ async function sendUserDataToN8N(userData) {
           identificationMethod: lookupMethod,
           confidenceLevel: lookupMethod === 'direct_lookup' ? 'high' : 
                            lookupMethod === 'user_list_search' ? 'high' :
+                           lookupMethod === 'enhanced_computer_name' ? 'high' :
                            lookupMethod === 'device_name_extraction' ? 'medium' :
                            lookupMethod === 'device_name_fallback' ? 'low' : 'very_low',
           monitoringReliable: lookupMethod !== 'final_fallback'
@@ -474,7 +743,7 @@ async function syncAllUsersToN8N() {
     console.log('\n🔄 Starting automated n8n sync for all users...');
     console.log(`🔗 n8n Webhook URL: ${N8N_WEBHOOK_URL}`);
     
-    // Get monitoring data for all users
+    // Get monitoring data for all users WITH ENHANCED COMPUTER NAME LOOKUP
     const allMonitoringData = await api.getAllUsersMonitoring({
       from: new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString().split('T')[0], // Last 24 hours
       to: new Date().toISOString().split('T')[0]
@@ -486,6 +755,7 @@ async function syncAllUsersToN8N() {
     }
 
     console.log(`📊 Found ${allMonitoringData.data.length} users to sync to n8n`);
+    console.log(`🖥️ REAL computer names found: ${allMonitoringData.summary.realComputerNamesFound || 0}`);
     
     let successCount = 0;
     let errorCount = 0;
@@ -537,21 +807,25 @@ setTimeout(() => {
 app.get('/api/health', (req, res) => {
   res.json({
     status: 'ok',
-    message: 'TimeDoctor API Server with ENHANCED Multi-Strategy User Lookup + Device Name Extraction is running',
+    message: 'TimeDoctor API Server with ENHANCED Real Computer Name Detection is running',
     timestamp: new Date().toISOString(),
     enhancedFeatures: {
-      deviceNameExtraction: true,
-      patterns: [
-        'Computer-John → John',
-        'Computer-TthUmwrm → Tthumwrm',
-        'DESKTOP-JOHNDOE → Johndoe'
+      realComputerNameDetection: true,
+      examples: [
+        '"Macbooks-MacBook-Air.local" → Real hostname found!',
+        '"DESKTOP-ABC123" → Real Windows computer name',
+        '"Johns-iMac.local" → Real Apple device name'
       ],
       lookupStrategies: [
-        '1. Direct TimeDoctor API lookup',
-        '2. User list search',
-        '3. Enhanced device name extraction',
-        '4. Device name fallback',
-        '5. UserId fallback'
+        '1. Direct TimeDoctor user details lookup',
+        '2. Activity records device lookup',
+        '3. Screenshot metadata device lookup',
+        '4. Worklog records device lookup', 
+        '5. Session/connection info lookup'
+      ],
+      newEndpoints: [
+        'GET /api/getRealComputerName/:userId',
+        'GET /api/getAllRealComputerNames'
       ]
     }
   });
@@ -616,6 +890,8 @@ app.use((req, res) => {
       'GET /api/health - Server health with enhanced capabilities',
       'GET /api/auth/status - Authentication status', 
       'GET /api/getUsers - All TimeDoctor users',
+      'GET /api/getRealComputerName/:userId - Get REAL computer name for user',
+      'GET /api/getAllRealComputerNames - Get REAL computer names for ALL users',
       'GET /api/n8n/lookupUser/:userId - Single user lookup',
       'GET /api/debug/userLookup/:userId - Debug user lookup issues',
       'GET /api/debug/allUsersWithDetails - All users with monitoring details'
@@ -636,26 +912,30 @@ app.use((err, req, res, next) => {
 // ==================== START SERVER ====================
 
 app.listen(PORT, () => {
-  console.log('\n🚀 TimeDoctor API Server with ENHANCED Device Name Extraction');
-  console.log('================================================================');
+  console.log('\n🚀 TimeDoctor API Server with ENHANCED REAL Computer Name Detection');
+  console.log('=====================================================================');
   console.log(`📡 Server running on: http://localhost:${PORT}`);
   console.log(`📧 Email: ${config.credentials.email}`);
   console.log(`🏢 Company: ${config.credentials.companyName}`);
-  console.log('\n🎯 ENHANCED DEVICE NAME EXTRACTION:');
-  console.log('===================================');
-  console.log('✅ Computer-TthUmwrm → "Tthumwrm"');
-  console.log('✅ Computer-John → "John"');
-  console.log('✅ DESKTOP-JOHNDOE → "Johndoe"');
-  console.log('✅ PC-MarySmith → "Marysmith"');
-  console.log('\n🔍 DEBUG ENDPOINTS:');
+  console.log('\n🎯 ENHANCED REAL COMPUTER NAME DETECTION:');
+  console.log('==========================================');
+  console.log('✅ "Macbooks-MacBook-Air.local" → REAL hostname detected!');
+  console.log('✅ "DESKTOP-ABC123" → Real Windows computer name');
+  console.log('✅ "Johns-iMac.local" → Real Apple device name');
+  console.log('✅ "Computer-TthUmwrm" → Falls back to pattern extraction');
+  console.log('\n🔍 TEST ENDPOINTS FOR REAL COMPUTER NAMES:');
+  console.log('===========================================');
+  console.log('🖥️ GET  /api/getRealComputerName/aLfYIu7-TthUmwrm');
+  console.log('🖥️ GET  /api/getAllRealComputerNames');
+  console.log('\n🔧 DEBUG ENDPOINTS:');
   console.log('==================');
   console.log('🔧 GET  /api/debug/userLookup/aLfYIu7-TthUmwrm');
   console.log('🔧 GET  /api/debug/allUsersWithDetails');
-  console.log('\n🎉 NOW EXTRACTS NAMES FROM DEVICE PATTERNS!');
-  console.log('===========================================');
-  console.log('✅ Your "Computer-TthUmwrm" will become "Tthumwrm"');
-  console.log('✅ Meaningful employee identification guaranteed');
-  console.log('\n🔥 Data will start flowing to n8n in 30 seconds with real names!');
+  console.log('\n🎉 NOW DETECTS REAL COMPUTER NAMES FROM TIMEKEEPER!');
+  console.log('===================================================');
+  console.log('✅ Your system will find "Macbooks-MacBook-Air.local" instead of "Computer-TthUmwrm"');
+  console.log('✅ Real hostnames, device names, and computer identification');
+  console.log('\n🔥 Data will start flowing to n8n in 30 seconds with REAL computer names!');
 });
 
 module.exports = app;
