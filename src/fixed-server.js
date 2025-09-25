@@ -106,164 +106,235 @@ async function getFixedUserLookup(userId) {
   }
 }
 
+// ==================== ENHANCED: ALL USERS IN ONE WEBHOOK CALL ====================
+
 /**
- * Send individual user data to n8n webhook WITH FIXED USERNAME LOOKUP
+ * 🎯 ENHANCED: Collect all user monitoring data and send ALL USERS IN ONE WEBHOOK CALL
+ * This replaces individual sends with ONE clean n8n execution
  */
-async function sendUserDataToN8N(userData) {
+async function syncAllUsersToN8N_OneCall() {
   try {
-    console.log(`🔍 [FIXED] Processing user data for userId: ${userData.userId}`);
+    console.log('\n🚀 [ENHANCED] Starting ONE-CALL sync with FIXED USERNAMES + COMPLETE ACTIVITY DATA...');
+    console.log(`🔗 n8n Webhook: ${N8N_WEBHOOK_URL}`);
     
-    // 🎯 FIXED USERNAME LOOKUP - Get real names like "Levi Daniels", "Joshua Banks"
-    const userLookup = await getFixedUserLookup(userData.userId);
+    // Get date range (last 24 hours)
+    const from = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+    const to = new Date().toISOString().split('T')[0];
     
-    const n8nPayload = {
-      // 👤 REAL NAME (like "Levi Daniels" from TimeDoctor dashboard)
-      name: userLookup.username,
-      realEmail: userLookup.email,
-      deviceOwner: userLookup.username,
-      whoOwnsThisDevice: userLookup.username,
+    console.log(`📅 Date range: ${from} to ${to}`);
+    
+    // Get monitoring data for all users with FIXED username identification
+    const allMonitoringData = await api.getAllUsersMonitoring({ from, to });
+
+    if (!allMonitoringData.success || !allMonitoringData.data) {
+      console.log('⚠️ No monitoring data available for one-call sync');
+      return;
+    }
+
+    console.log(`📊 [ENHANCED] Found ${allMonitoringData.data.length} users to process for ONE webhook call`);
+    
+    // 🔥 PROCESS ALL USERS WITH FIXED USERNAME LOOKUP + COMPLETE ACTIVITY DATA
+    const allUsersWithCompleteData = [];
+    
+    for (const userData of allMonitoringData.data) {
+      console.log(`\n🔄 [ENHANCED] Processing user: ${userData.userId}`);
       
-      timestamp: new Date().toISOString(),
-      source: 'timekeeper-workspace-services',
-      type: 'user_monitoring',
+      // 🎯 FIXED USERNAME LOOKUP - Get real names like "Levi Daniels", "Joshua Banks"
+      const userLookup = await getFixedUserLookup(userData.userId);
       
-      user: {
+      const enhancedUserData = {
+        // 👤 REAL NAME (like "Levi Daniels" from TimeDoctor dashboard)
+        name: userLookup.username,
+        email: userData.userInfo?.email || 'Unknown',
         userId: userData.userId,
+        realName: userLookup.username,
+        realEmail: userLookup.email,
+        timezone: userData.userInfo?.timezone || userLookup.timezone || 'Unknown',
+        role: userData.userInfo?.role || userLookup.role || 'user',
+        status: userData.userInfo?.status || 'offline',
+        processedAt: new Date().toISOString(),
         
-        // 🎯 FIXED: Real names from TimeDoctor (like dashboard shows)
+        // 🎯 DEVICE OWNER INFO
         deviceOwner: userLookup.username,
         whoOwnsThisDevice: userLookup.username,
-        realName: userLookup.username,
-        realUsername: userLookup.username,
-        realEmail: userLookup.email,
-        realTimezone: userLookup.timezone,
-        realRole: userLookup.role,
         
-        // Original device name (for reference)
-        deviceName: userData.userInfo?.name || 'Unknown Device',
-        email: userData.userInfo?.email || 'Unknown',
-        
-        // 🔍 LOOKUP SUCCESS INFORMATION
-        lookupMethod: userLookup.method,
-        lookupError: userLookup.error || null,
+        // 📊 SUMMARY COUNTS
         lookupSuccess: userLookup.success,
-        confidence: userLookup.confidence,
-        
-        timezone: userData.userInfo?.timezone || 'Unknown',
-        lastSeen: userData.userInfo?.lastSeenGlobal,
-        deviceInfo: {
-          ...userData.userInfo?.deviceInfo || {},
-          deviceOwner: userLookup.username,
-          whoOwnsThisDevice: userLookup.username,
-          enrichedWithRealData: true,
-          enrichedAt: new Date().toISOString()
-        }
-      },
-      
-      monitoring: {
-        dateRange: userData.dateRange,
         hasData: userData.summary?.hasData || false,
         totalActivities: userData.activitySummary?.totalRecords || 0,
         totalScreenshots: userData.screenshots?.totalScreenshots || 0,
         totalDisconnections: userData.disconnectionEvents?.totalEvents || 0,
-        totalTimeUsageRecords: userData.timeUsage?.totalRecords || 0,
+        totalTimeUsage: userData.timeUsage?.totalRecords || 0,
         
-        // 👤 EMPLOYEE IDENTIFICATION (FIXED TO SHOW REAL NAMES)
-        employeeIdentification: {
-          identifiedName: userLookup.username,
-          identifiedEmail: userLookup.email,
+        // 🎯 COMPLETE ACTIVITY DATA ARRAYS
+        activities: userData.activitySummary?.data || [],
+        screenshots: userData.screenshots?.data || [],
+        timeUsage: userData.timeUsage?.data || [],
+        disconnections: userData.disconnectionEvents?.data || [],
+        
+        // 📈 PRODUCTIVITY & STATS DATA  
+        productivityStats: userData.productivityStats?.data || null,
+        overallStats: userData.overallStats?.data || null,
+        
+        // 📅 DATE RANGE
+        dateRange: { from, to },
+        
+        // 🔍 USER INFO & LOOKUP DETAILS
+        user: {
+          userId: userData.userId,
+          
+          // 🎯 FIXED: Real names from TimeDoctor (like dashboard shows)
           deviceOwner: userLookup.username,
           whoOwnsThisDevice: userLookup.username,
-          identificationMethod: userLookup.method,
-          confidenceLevel: userLookup.confidence,
-          monitoringReliable: userLookup.success
+          realName: userLookup.username,
+          realUsername: userLookup.username,
+          realEmail: userLookup.email,
+          realTimezone: userLookup.timezone,
+          realRole: userLookup.role,
+          
+          // Original device name (for reference)
+          deviceName: userData.userInfo?.name || 'Unknown Device',
+          email: userData.userInfo?.email || 'Unknown',
+          
+          // 🔍 LOOKUP SUCCESS INFORMATION
+          lookupMethod: userLookup.method,
+          lookupError: userLookup.error || null,
+          lookupSuccess: userLookup.success,
+          confidence: userLookup.confidence,
+          
+          timezone: userData.userInfo?.timezone || 'Unknown',
+          lastSeen: userData.userInfo?.lastSeenGlobal,
+          deviceInfo: {
+            ...userData.userInfo?.deviceInfo || {},
+            deviceOwner: userLookup.username,
+            whoOwnsThisDevice: userLookup.username,
+            enrichedWithRealData: true,
+            enrichedAt: new Date().toISOString()
+          }
+        },
+        
+        // 👤 EMPLOYEE IDENTIFICATION (FIXED TO SHOW REAL NAMES)
+        monitoring: {
+          dateRange: userData.dateRange,
+          hasData: userData.summary?.hasData || false,
+          totalActivities: userData.activitySummary?.totalRecords || 0,
+          totalScreenshots: userData.screenshots?.totalScreenshots || 0,
+          totalDisconnections: userData.disconnectionEvents?.totalEvents || 0,
+          totalTimeUsageRecords: userData.timeUsage?.totalRecords || 0,
+          
+          employeeIdentification: {
+            identifiedName: userLookup.username,
+            identifiedEmail: userLookup.email,
+            deviceOwner: userLookup.username,
+            whoOwnsThisDevice: userLookup.username,
+            identificationMethod: userLookup.method,
+            confidenceLevel: userLookup.confidence,
+            monitoringReliable: userLookup.success
+          }
+        },
+        
+        // 🔍 DEBUG & MONITORING STATUS
+        monitoringStatus: {
+          activityStatus: userData.activitySummary?.status || 'no_data',
+          screenshotStatus: userData.screenshots?.status || 'no_data',
+          timeUsageStatus: userData.timeUsage?.status || 'no_data',
+          disconnectionStatus: userData.disconnectionEvents?.status || 'no_data'
         }
+      };
+      
+      console.log(`✅ [ENHANCED] Added "${userLookup.username}" with COMPLETE data (${userLookup.method})`);
+      console.log(`   📊 Activities: ${enhancedUserData.totalActivities}`);
+      console.log(`   📸 Screenshots: ${enhancedUserData.totalScreenshots}`);
+      console.log(`   ⏱️  Time Usage: ${enhancedUserData.totalTimeUsage}`);
+      console.log(`   🔌 Disconnections: ${enhancedUserData.totalDisconnections}`);
+      
+      allUsersWithCompleteData.push(enhancedUserData);
+      
+      // Small delay between user processing
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+
+    // 🎯 CREATE ONE SINGLE JSON PAYLOAD WITH ALL USERS + COMPLETE ACTIVITY DATA + FIXED USERNAMES
+    const oneCallPayload = {
+      batchInfo: {
+        type: 'ALL_USERS_WITH_FIXED_USERNAMES_AND_COMPLETE_ACTIVITY_DATA_IN_ONE_CALL',
+        totalUsers: allUsersWithCompleteData.length,
+        timestamp: new Date().toISOString(),
+        source: 'timekeeper-workspace-services-fixed-enhanced',
+        webhookUrl: N8N_WEBHOOK_URL,
+        description: 'ALL users with FIXED USERNAMES + COMPLETE activity data in ONE webhook call!',
+        includes: [
+          'FIXED real usernames like "Levi Daniels", "Joshua Banks"',
+          'Complete activities array with detailed records',
+          'Screenshots array with scores and categories', 
+          'TimeUsage array with app/website usage patterns',
+          'Disconnections array with idle time data',
+          'Productivity stats and overall statistics',
+          'Device owner identification'
+        ],
+        dateRange: { from, to }
       },
       
-      activities: userData.activitySummary?.data || [],
-      screenshots: userData.screenshots?.data || [],
-      timeUsage: userData.timeUsage?.data || [],
-      disconnections: userData.disconnectionEvents?.data || [],
-      productivityStats: userData.productivityStats?.data || null,
-      overallStats: userData.overallStats?.data || null
+      // 👥 ALL USERS WITH FIXED USERNAMES + COMPLETE ACTIVITY DATA
+      allUsers: allUsersWithCompleteData,
+      
+      // 📈 ENHANCED SUMMARY
+      summary: {
+        totalUsers: allUsersWithCompleteData.length,
+        usersWithData: allUsersWithCompleteData.filter(u => u.hasData).length,
+        usersWithFixedNames: allUsersWithCompleteData.filter(u => u.lookupSuccess).length,
+        totalActivities: allUsersWithCompleteData.reduce((sum, u) => sum + u.totalActivities, 0),
+        totalScreenshots: allUsersWithCompleteData.reduce((sum, u) => sum + u.totalScreenshots, 0),
+        totalTimeUsage: allUsersWithCompleteData.reduce((sum, u) => sum + u.totalTimeUsage, 0),
+        totalDisconnections: allUsersWithCompleteData.reduce((sum, u) => sum + u.totalDisconnections, 0),
+        realNamesFound: allUsersWithCompleteData.map(u => u.name),
+        dateRange: { from, to },
+        generatedAt: new Date().toISOString()
+      }
     };
 
-    console.log(`📤 [FIXED] Sending data for: "${userLookup.username}" (${userLookup.method})`);
-    console.log(`🔗 Using webhook: ${N8N_WEBHOOK_URL}`);
+    console.log('\n📤 [ENHANCED] Sending ALL users with FIXED USERNAMES + COMPLETE ACTIVITY DATA in ONE webhook call...');
+    console.log(`📊 Total users: ${allUsersWithCompleteData.length}`);
+    console.log(`👤 Users with fixed names: ${oneCallPayload.summary.usersWithFixedNames}`);
+    console.log(`📊 Total activities: ${oneCallPayload.summary.totalActivities}`);
+    console.log(`📸 Total screenshots: ${oneCallPayload.summary.totalScreenshots}`);
+    console.log(`⏱️  Total time usage: ${oneCallPayload.summary.totalTimeUsage}`);
+    console.log(`🔌 Total disconnections: ${oneCallPayload.summary.totalDisconnections}`);
+    console.log(`✅ Names: ${oneCallPayload.summary.realNamesFound.join(', ')}`);
+    console.log(`🔗 Webhook: ${N8N_WEBHOOK_URL}`);
+    console.log('🎯 THIS IS ONE CALL - NO MORE UGLY INDIVIDUAL WEBHOOK EXECUTIONS!');
     
+    // 🚀 SEND ONE SINGLE ENHANCED WEBHOOK CALL
     const response = await fetch(N8N_WEBHOOK_URL, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'User-Agent': 'Workspace-Services-Monitor/1.0',
-        'Accept': 'application/json'
+        'User-Agent': 'Workspace-Services-Fixed-Enhanced-One-Call/1.0'
       },
-      body: JSON.stringify(n8nPayload),
-      timeout: 10000
+      body: JSON.stringify(oneCallPayload),
+      timeout: 60000 // Increased timeout for larger payloads
     });
 
     console.log(`📡 Response: ${response.status} ${response.statusText}`);
 
     if (response.ok) {
-      console.log(`✅ SUCCESS: Sent data for "${userLookup.username}" (${userData.userId})`);
+      console.log('\n✅ [ENHANCED] ONE CALL SUCCESS!');
+      console.log(`🎉 Sent ALL ${allUsersWithCompleteData.length} users with FIXED USERNAMES + COMPLETE ACTIVITY DATA!`);
+      console.log(`📊 Your n8n received: ${oneCallPayload.summary.totalActivities} activities, ${oneCallPayload.summary.totalScreenshots} screenshots!`);
+      console.log(`🎯 Your n8n will show ONE clean execution with RICH data + REAL NAMES!`);
+      console.log(`👥 Real names like: ${oneCallPayload.summary.realNamesFound.slice(0, 3).join(', ')}...`);
       return true;
     } else {
       const errorText = await response.text().catch(() => 'Unable to read response');
-      console.error(`❌ FAILED: ${response.status} ${response.statusText}`);
-      console.error(`❌ Error details: ${errorText}`);
+      console.error(`❌ [ENHANCED] ONE CALL FAILED: ${response.status} ${response.statusText}`);
+      console.error(`❌ Error: ${errorText}`);
       return false;
     }
     
   } catch (error) {
-    console.error(`❌ Error sending data for ${userData.userId}:`, error.message);
+    console.error(`❌ [ENHANCED] Error during one-call sync: ${error.message}`);
+    console.error(error.stack);
     return false;
-  }
-}
-
-/**
- * FIXED: Collect all user monitoring data and send to n8n (ONE TIME ONLY)
- */
-async function syncAllUsersToN8N() {
-  try {
-    console.log('\n🚀 [FIXED] Starting ONE-TIME sync with REAL USERNAMES...');
-    console.log(`🔗 n8n Webhook: ${N8N_WEBHOOK_URL}`);
-    
-    // Get monitoring data for all users with FIXED username identification
-    const allMonitoringData = await api.getAllUsersMonitoring({
-      from: new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString().split('T')[0], // Last 24 hours
-      to: new Date().toISOString().split('T')[0]
-    });
-
-    if (!allMonitoringData.success || !allMonitoringData.data) {
-      console.log('⚠️ No monitoring data available');
-      return;
-    }
-
-    console.log(`📊 [FIXED] Found ${allMonitoringData.data.length} users to sync`);
-    
-    let successCount = 0;
-    let errorCount = 0;
-
-    // Send each user's data separately with FIXED username lookup
-    for (const userData of allMonitoringData.data) {
-      console.log(`\n🔄 Processing user: ${userData.userId}`);
-      
-      // Add delay between requests
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      
-      const success = await sendUserDataToN8N(userData);
-      if (success) {
-        successCount++;
-      } else {
-        errorCount++;
-      }
-    }
-
-    console.log(`\n✅ [FIXED] Sync completed: ${successCount} successful, ${errorCount} errors`);
-    console.log(`🎉 Data sent to n8n with REAL USERNAMES like "Levi Daniels", "Joshua Banks"!`);
-    
-  } catch (error) {
-    console.error('❌ Error during sync:', error.message);
   }
 }
 
@@ -292,7 +363,7 @@ app.get('/api/debug/fixedUserLookup/:userId', async (req, res) => {
         method: result.method,
         confidence: result.confidence,
         nextSteps: result.success 
-          ? 'User will show with real name in n8n webhooks'
+          ? 'User will show with real name in ONE webhook call to n8n'
           : 'Check if userId exists in TimeDoctor or update user profile'
       }
     });
@@ -348,13 +419,100 @@ app.get('/api/debug/allUsers', async (req, res) => {
     
     res.json({
       success: true,
-      message: `Found ${userList.length} users in TimeDoctor company`,
+      message: `Found ${userList.length} users in TimeDoctor company - will be sent in ONE webhook call`,
       totalUsers: userList.length,
       data: userList,
       explanation: {
         purpose: 'This shows all users in your TimeDoctor company',
         usage: 'Use the "userId" field to test specific user lookup with /api/debug/fixedUserLookup/{userId}',
-        finalName: 'The "finalName" field shows what name will appear in n8n webhooks'
+        finalName: 'The "finalName" field shows what name will appear in the ONE n8n webhook call',
+        enhancement: 'NOW SENDS ALL USERS IN ONE WEBHOOK CALL - NO MORE INDIVIDUAL CALLS!'
+      }
+    });
+    
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+app.get('/api/preview/enhancedData', async (req, res) => {
+  try {
+    console.log('👀 [PREVIEW] Getting sample of enhanced one-call data structure...');
+    
+    const from = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+    const to = new Date().toISOString().split('T')[0];
+    
+    const allMonitoringData = await api.getAllUsersMonitoring({ from, to });
+    
+    if (!allMonitoringData.success || !allMonitoringData.data || allMonitoringData.data.length === 0) {
+      return res.json({
+        success: false,
+        message: 'No sample data available',
+        sampleStructure: {
+          batchInfo: {
+            type: "ALL_USERS_WITH_FIXED_USERNAMES_AND_COMPLETE_ACTIVITY_DATA_IN_ONE_CALL",
+            totalUsers: 11,
+            description: "ALL users with FIXED USERNAMES + COMPLETE activity data in ONE webhook call!"
+          },
+          allUsers: [
+            {
+              name: "Alice Hale", // FIXED real name from TimeDoctor
+              userId: "aLfYIu7-TthUmwrm",
+              deviceOwner: "Alice Hale",
+              activities: [],
+              screenshots: [],
+              timeUsage: [],
+              disconnections: []
+            }
+          ]
+        }
+      });
+    }
+    
+    // Get first user as sample and apply fixed lookup
+    const sampleUserData = allMonitoringData.data[0];
+    const sampleLookup = await getFixedUserLookup(sampleUserData.userId);
+    
+    const sampleData = {
+      batchInfo: {
+        type: "ALL_USERS_WITH_FIXED_USERNAMES_AND_COMPLETE_ACTIVITY_DATA_IN_ONE_CALL",
+        totalUsers: allMonitoringData.data.length,
+        description: "ALL users with FIXED USERNAMES + COMPLETE activity data in ONE webhook call!"
+      },
+      sampleUser: {
+        name: sampleLookup.username, // FIXED real name!
+        userId: sampleUserData.userId,
+        deviceOwner: sampleLookup.username,
+        whoOwnsThisDevice: sampleLookup.username,
+        lookupSuccess: sampleLookup.success,
+        
+        // Activity data samples
+        activities: sampleUserData.activitySummary?.data?.slice(0, 2) || [],
+        screenshots: sampleUserData.screenshots?.data?.slice(0, 2) || [],
+        timeUsage: sampleUserData.timeUsage?.data?.slice(0, 3) || [],
+        disconnections: sampleUserData.disconnectionEvents?.data?.slice(0, 2) || [],
+        
+        // Counts
+        totalActivities: sampleUserData.activitySummary?.totalRecords || 0,
+        totalScreenshots: sampleUserData.screenshots?.totalScreenshots || 0,
+        totalTimeUsage: sampleUserData.timeUsage?.totalRecords || 0,
+        totalDisconnections: sampleUserData.disconnectionEvents?.totalEvents || 0
+      }
+    };
+    
+    res.json({
+      success: true,
+      message: 'Sample of enhanced one-call data structure with FIXED USERNAMES',
+      note: 'This shows what the ONE webhook call will look like with real names + complete activity data',
+      sampleData: sampleData,
+      enhancement: {
+        fixedUsernames: `Real names like "${sampleLookup.username}" instead of device names`,
+        oneWebhookCall: 'ALL users sent in ONE call - no more individual webhook executions',
+        completeActivityData: 'Full arrays of activities, screenshots, timeUsage, disconnections',
+        cleanN8nExecution: 'Your n8n will show ONE clean execution instead of multiple ugly ones'
       }
     });
     
@@ -370,23 +528,25 @@ app.get('/api/debug/allUsers', async (req, res) => {
 
 /**
  * @route   POST /api/sync/now
- * @desc    Manually trigger sync to n8n (for testing)
+ * @desc    Manually trigger ONE CALL sync to n8n (for testing)
  */
 app.post('/api/sync/now', async (req, res) => {
   try {
-    console.log('🚀 [MANUAL] Manual sync triggered...');
+    console.log('🚀 [MANUAL] Manual ONE CALL sync triggered...');
     
-    // Run sync in background
-    syncAllUsersToN8N().then(() => {
-      console.log('✅ [MANUAL] Background sync completed');
+    // Run ONE CALL sync in background
+    syncAllUsersToN8N_OneCall().then(() => {
+      console.log('✅ [MANUAL] Background ONE CALL sync completed');
     }).catch(error => {
-      console.error('❌ [MANUAL] Background sync failed:', error.message);
+      console.error('❌ [MANUAL] Background ONE CALL sync failed:', error.message);
     });
     
     res.json({
       success: true,
-      message: 'Manual sync started in background',
-      status: 'Sync is running, check console for progress'
+      message: 'Manual ONE CALL sync started in background',
+      description: 'ALL users with FIXED USERNAMES + COMPLETE activity data will be sent in ONE webhook call',
+      status: 'ONE CALL sync is running, check console for progress',
+      enhancement: 'No more individual webhook calls - ONE clean n8n execution!'
     });
     
   } catch (error) {
@@ -401,32 +561,37 @@ app.post('/api/sync/now', async (req, res) => {
 
 /**
  * @route   GET /api/health
- * @desc    Health check with FIXED status
+ * @desc    Health check with FIXED + ENHANCED status
  */
 app.get('/api/health', (req, res) => {
   res.json({
     status: 'ok',
-    message: 'TimeDoctor API Server with FIXED Username Detection',
+    message: 'TimeDoctor API Server with FIXED Username Detection + ENHANCED One-Call Webhook',
     timestamp: new Date().toISOString(),
     fixes: {
-      usernameLookup: 'FIXED - Now gets real names like "Levi Daniels", "Joshua Banks"',
+      usernameLookup: 'FIXED - Gets real names like "Levi Daniels", "Joshua Banks"',
       webhookFrequency: 'FIXED - Sends data only ONCE (not every 2 minutes)',
-      features: [
-        'Real TimeDoctor usernames in webhooks',
-        'Single send on startup (not recurring)',
-        'Proper user ID matching', 
-        'Enhanced debugging endpoints'
-      ]
+      webhookMethod: 'ENHANCED - ALL users in ONE webhook call (no more ugly individual calls)',
+      completeActivityData: 'ENHANCED - Full activity arrays included in ONE call'
+    },
+    enhancedFeatures: {
+      oneCallWebhook: 'ALL users sent in ONE JSON payload to n8n',
+      fixedUsernames: 'Real TimeDoctor usernames in webhook data',
+      completeActivityData: 'Full activities, screenshots, timeUsage, disconnections arrays',
+      cleanN8nExecution: 'ONE clean execution instead of multiple individual calls',
+      improvedUI: 'No more ugly individual webhook executions in n8n'
     },
     testEndpoints: [
       'GET /api/debug/fixedUserLookup/aLfYIu7-TthUmwrm',
       'GET /api/debug/allUsers',
+      'GET /api/preview/enhancedData - NEW: Preview one-call data structure',
       'POST /api/sync/now'
     ],
     webhookConfig: {
       url: N8N_WEBHOOK_URL,
       sendOnce: SEND_ONCE_ON_STARTUP,
-      sendRecurring: SEND_RECURRING
+      sendRecurring: SEND_RECURRING,
+      method: 'ONE CALL - All users in single payload'
     }
   });
 });
@@ -437,10 +602,11 @@ app.use((req, res) => {
     success: false,
     error: 'Endpoint not found',
     availableEndpoints: [
-      'GET /api/health - Server health with FIXED status',
+      'GET /api/health - Server health with FIXED + ENHANCED status',
       'GET /api/debug/fixedUserLookup/:userId - Test FIXED user lookup',
-      'GET /api/debug/allUsers - See all TimeDoctor users with their IDs',
-      'POST /api/sync/now - Manually trigger sync to n8n'
+      'GET /api/debug/allUsers - See all users (will be sent in ONE call)',
+      'GET /api/preview/enhancedData - Preview ONE CALL data structure',
+      'POST /api/sync/now - Manually trigger ONE CALL sync to n8n'
     ]
   });
 });
@@ -458,8 +624,8 @@ app.use((err, req, res, next) => {
 // ==================== START SERVER ====================
 
 app.listen(PORT, () => {
-  console.log('\n🚀 TimeDoctor API Server with FIXES APPLIED');
-  console.log('===============================================');
+  console.log('\n🚀 TimeDoctor API Server with FIXES APPLIED + ENHANCED One-Call Webhook');
+  console.log('===========================================================================');
   console.log(`📡 Server: http://localhost:${PORT}`);
   console.log(`📧 Email: ${config.credentials.email}`);
   console.log(`🏢 Company: ${config.credentials.companyName}`);
@@ -467,29 +633,36 @@ app.listen(PORT, () => {
   console.log('=================');
   console.log('🎯 1. FIXED Username Lookup - Gets real names like "Levi Daniels"');
   console.log('🎯 2. FIXED Webhook Frequency - Sends ONCE only (not every 2 minutes)');
-  console.log('\n🔍 TEST THE FIXES:');
-  console.log('==================');
-  console.log('1. Check all users: GET  /api/debug/allUsers');  
-  console.log('2. Test user lookup: GET  /api/debug/fixedUserLookup/aLfYIu7-TthUmwrm');
-  console.log('3. Manual sync: POST /api/sync/now');
-  console.log('\n🎉 FIXED CONFIGURATION:');
-  console.log('=======================');
+  console.log('\n🔥 NEW ENHANCEMENTS:');
+  console.log('===================');
+  console.log('🎯 3. ENHANCED One-Call Webhook - ALL users in ONE JSON payload');
+  console.log('🎯 4. ENHANCED Complete Activity Data - Full arrays included');
+  console.log('🎯 5. ENHANCED Clean n8n UI - ONE execution instead of multiple ugly ones');
+  console.log('\n🔍 TEST THE ENHANCED FIXES:');
+  console.log('===========================');
+  console.log('1. Preview one-call data: GET  /api/preview/enhancedData');
+  console.log('2. Check all users: GET  /api/debug/allUsers');  
+  console.log('3. Test user lookup: GET  /api/debug/fixedUserLookup/aLfYIu7-TthUmwrm');
+  console.log('4. Manual ONE CALL sync: POST /api/sync/now');
+  console.log('\n🎉 ENHANCED CONFIGURATION:');
+  console.log('==========================');
   console.log(`✅ Send Once: ${SEND_ONCE_ON_STARTUP}`);
   console.log(`✅ Recurring: ${SEND_RECURRING}`);
   console.log(`✅ Webhook: ${N8N_WEBHOOK_URL}`);
+  console.log(`✅ Method: ONE CALL - All users in single payload`);
   
-  // 🚀 FIXED: Send data ONCE on startup (if enabled)
+  // 🚀 ENHANCED: Send data ONCE on startup using ONE CALL method
   if (SEND_ONCE_ON_STARTUP) {
     setTimeout(() => {
-      console.log('\n🚀 [STARTUP] Running SINGLE sync with FIXED usernames...');
-      syncAllUsersToN8N();
+      console.log('\n🚀 [STARTUP] Running ENHANCED ONE CALL sync with FIXED usernames + COMPLETE activity data...');
+      syncAllUsersToN8N_OneCall();
     }, 10000); // Wait 10 seconds for server to fully start
   } else {
-    console.log('\n⏸️ One-time sync disabled. Use POST /api/sync/now to manually trigger');
+    console.log('\n⏸️ One-time sync disabled. Use POST /api/sync/now to manually trigger ONE CALL sync');
   }
   
-  // No recurring cron job - data sent only once!
-  console.log('\n🎯 Server ready! Real usernames will appear in n8n webhooks!');
+  console.log('\n🎯 Server ready! Real usernames + complete activity data will be sent in ONE clean webhook call!');
+  console.log('🎉 Your n8n will show ONE execution instead of multiple ugly individual calls!');
 });
 
 module.exports = app;
