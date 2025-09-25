@@ -9,8 +9,8 @@ const config = require('./config');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// N8N Webhook Configuration - EASILY CHANGEABLE HERE
-const N8N_WEBHOOK_URL = process.env.N8N_WEBHOOK_URL || 'https://n8n.srv470812.hstgr.cloud/webhook/workspace-url-n8n';
+// 🔗 UPDATED N8N WEBHOOK URL
+const N8N_WEBHOOK_URL = process.env.N8N_WEBHOOK_URL || 'https://n8n.srv470812.hstgr.cloud/webhook-test/workspace-url-n8n';
 
 // 🔧 FIXED: Send data only ONCE - disable recurring cron job
 const SEND_ONCE_ON_STARTUP = true; // Set to true to send once on startup
@@ -206,7 +206,8 @@ async function sendAllUsersDataToN8N(allUsersData) {
         source: 'timekeeper-workspace-services',
         type: 'batch_user_monitoring',
         successfulLookups: processedUsers.filter(u => u.user.lookupSuccess).length,
-        failedLookups: processedUsers.filter(u => !u.user.lookupSuccess).length
+        failedLookups: processedUsers.filter(u => !u.user.lookupSuccess).length,
+        webhookUrl: N8N_WEBHOOK_URL
       },
       
       // 👥 ALL USERS DATA IN ONE PAYLOAD
@@ -224,8 +225,8 @@ async function sendAllUsersDataToN8N(allUsersData) {
       }
     };
 
-    console.log(`\n📤 [BATCH] Sending ALL ${processedUsers.length} users in SINGLE webhook call`);
-    console.log(`🔗 Webhook URL: ${N8N_WEBHOOK_URL}`);
+    console.log(`\n📤 [BATCH] Sending ALL ${processedUsers.length} users to UPDATED webhook`);
+    console.log(`🔗 NEW Webhook URL: ${N8N_WEBHOOK_URL}`);
     console.log(`✅ Real names identified: ${singleN8NPayload.summary.realNamesIdentified.join(', ')}`);
     
     const response = await fetch(N8N_WEBHOOK_URL, {
@@ -242,18 +243,20 @@ async function sendAllUsersDataToN8N(allUsersData) {
     console.log(`📡 Response: ${response.status} ${response.statusText}`);
 
     if (response.ok) {
-      console.log(`✅ SUCCESS: Sent ALL ${processedUsers.length} users in SINGLE webhook call!`);
-      console.log(`🎉 Your n8n will receive ONE webhook with ALL users data!`);
+      console.log(`✅ SUCCESS: Sent ALL ${processedUsers.length} users to NEW webhook!`);
+      console.log(`🎉 Your UPDATED n8n webhook received ONE batch with ALL users data!`);
       return true;
     } else {
       const errorText = await response.text().catch(() => 'Unable to read response');
       console.error(`❌ FAILED: ${response.status} ${response.statusText}`);
       console.error(`❌ Error details: ${errorText}`);
+      console.error(`🔗 Failed webhook URL: ${N8N_WEBHOOK_URL}`);
       return false;
     }
     
   } catch (error) {
-    console.error(`❌ Error sending batch data to n8n:`, error.message);
+    console.error(`❌ Error sending batch data to NEW webhook:`, error.message);
+    console.error(`🔗 Target webhook URL: ${N8N_WEBHOOK_URL}`);
     return false;
   }
 }
@@ -264,7 +267,7 @@ async function sendAllUsersDataToN8N(allUsersData) {
 async function syncAllUsersToN8N() {
   try {
     console.log('\n🚀 [BATCH] Starting ONE-TIME BATCH sync with REAL USERNAMES...');
-    console.log(`🔗 n8n Webhook: ${N8N_WEBHOOK_URL}`);
+    console.log(`🔗 UPDATED n8n Webhook: ${N8N_WEBHOOK_URL}`);
     
     // Get monitoring data for all users with FIXED username identification
     const allMonitoringData = await api.getAllUsersMonitoring({
@@ -279,14 +282,14 @@ async function syncAllUsersToN8N() {
 
     console.log(`📊 [BATCH] Found ${allMonitoringData.data.length} users for BATCH processing`);
     
-    // 🎯 Send ALL users in ONE webhook call
+    // 🎯 Send ALL users in ONE webhook call to UPDATED URL
     const success = await sendAllUsersDataToN8N(allMonitoringData.data);
     
     if (success) {
-      console.log(`\n✅ [BATCH] SUCCESS: ALL users sent in SINGLE webhook call!`);
-      console.log(`🎉 Your n8n received ONE webhook with ALL ${allMonitoringData.data.length} users!`);
+      console.log(`\n✅ [BATCH] SUCCESS: ALL users sent to UPDATED webhook!`);
+      console.log(`🎉 Your UPDATED n8n received ONE webhook with ALL ${allMonitoringData.data.length} users!`);
     } else {
-      console.log(`\n❌ [BATCH] FAILED: Could not send batch data to n8n`);
+      console.log(`\n❌ [BATCH] FAILED: Could not send batch data to UPDATED webhook`);
     }
     
   } catch (error) {
@@ -378,11 +381,16 @@ app.get('/api/debug/allUsers', async (req, res) => {
       message: `Found ${userList.length} users in TimeDoctor company`,
       totalUsers: userList.length,
       data: userList,
+      webhookInfo: {
+        currentWebhookUrl: N8N_WEBHOOK_URL,
+        webhookType: 'UPDATED webhook-test endpoint',
+        batchProcessing: true
+      },
       explanation: {
         purpose: 'This shows all users in your TimeDoctor company',
         usage: 'Use the "userId" field to test specific user lookup with /api/debug/fixedUserLookup/{userId}',
         finalName: 'The "finalName" field shows what name will appear in n8n webhooks',
-        batchInfo: 'ALL these users will be sent in ONE single webhook call to n8n'
+        batchInfo: 'ALL these users will be sent to the UPDATED webhook in ONE single call'
       }
     });
     
@@ -398,15 +406,15 @@ app.get('/api/debug/allUsers', async (req, res) => {
 
 /**
  * @route   POST /api/sync/now
- * @desc    Manually trigger BATCH sync to n8n (for testing)
+ * @desc    Manually trigger BATCH sync to UPDATED n8n webhook (for testing)
  */
 app.post('/api/sync/now', async (req, res) => {
   try {
-    console.log('🚀 [MANUAL] Manual BATCH sync triggered...');
+    console.log('🚀 [MANUAL] Manual BATCH sync triggered to UPDATED webhook...');
     
     // Run sync in background
     syncAllUsersToN8N().then(() => {
-      console.log('✅ [MANUAL] Background BATCH sync completed');
+      console.log('✅ [MANUAL] Background BATCH sync completed to UPDATED webhook');
     }).catch(error => {
       console.error('❌ [MANUAL] Background BATCH sync failed:', error.message);
     });
@@ -415,7 +423,12 @@ app.post('/api/sync/now', async (req, res) => {
       success: true,
       message: 'Manual BATCH sync started in background',
       status: 'BATCH sync is running - ALL users will be sent in ONE webhook call',
-      note: 'Check console for progress and your n8n for ONE webhook with ALL users'
+      webhookInfo: {
+        targetUrl: N8N_WEBHOOK_URL,
+        webhookType: 'UPDATED webhook-test endpoint',
+        batchProcessing: true
+      },
+      note: 'Check console for progress and your UPDATED n8n webhook for ONE batch with ALL users'
     });
     
   } catch (error) {
@@ -430,21 +443,23 @@ app.post('/api/sync/now', async (req, res) => {
 
 /**
  * @route   GET /api/health
- * @desc    Health check with BATCH status
+ * @desc    Health check with UPDATED webhook status
  */
 app.get('/api/health', (req, res) => {
   res.json({
     status: 'ok',
-    message: 'TimeDoctor API Server with BATCH Username Detection',
+    message: 'TimeDoctor API Server with BATCH Processing & UPDATED Webhook',
     timestamp: new Date().toISOString(),
     fixes: {
       usernameLookup: 'FIXED - Now gets real names like "Levi Daniels", "Joshua Banks"',
       webhookFrequency: 'FIXED - Sends data only ONCE (not every 2 minutes)',
       webhookFormat: 'FIXED - Sends ALL users in ONE webhook call (not individual calls)',
+      webhookUrl: 'UPDATED - Now using webhook-test endpoint',
       features: [
         'Real TimeDoctor usernames in webhooks',
         'Single webhook call with ALL users',
         'Single send on startup (not recurring)',
+        'UPDATED webhook URL (webhook-test)',
         'Proper user ID matching', 
         'Enhanced debugging endpoints'
       ]
@@ -456,6 +471,7 @@ app.get('/api/health', (req, res) => {
     ],
     webhookConfig: {
       url: N8N_WEBHOOK_URL,
+      urlType: 'UPDATED webhook-test endpoint',
       sendOnce: SEND_ONCE_ON_STARTUP,
       sendRecurring: SEND_RECURRING,
       format: 'BATCH - All users in ONE webhook call'
@@ -469,10 +485,10 @@ app.use((req, res) => {
     success: false,
     error: 'Endpoint not found',
     availableEndpoints: [
-      'GET /api/health - Server health with BATCH status',
+      'GET /api/health - Server health with UPDATED webhook status',
       'GET /api/debug/fixedUserLookup/:userId - Test FIXED user lookup',
       'GET /api/debug/allUsers - See all TimeDoctor users with their IDs',
-      'POST /api/sync/now - Manually trigger BATCH sync to n8n'
+      'POST /api/sync/now - Manually trigger BATCH sync to UPDATED webhook'
     ]
   });
 });
@@ -490,8 +506,8 @@ app.use((err, req, res, next) => {
 // ==================== START SERVER ====================
 
 app.listen(PORT, () => {
-  console.log('\n🚀 TimeDoctor API Server with BATCH PROCESSING');
-  console.log('===============================================');
+  console.log('\n🚀 TimeDoctor API Server with BATCH PROCESSING & UPDATED WEBHOOK');
+  console.log('==================================================================');
   console.log(`📡 Server: http://localhost:${PORT}`);
   console.log(`📧 Email: ${config.credentials.email}`);
   console.log(`🏢 Company: ${config.credentials.companyName}`);
@@ -500,30 +516,37 @@ app.listen(PORT, () => {
   console.log('🎯 1. FIXED Username Lookup - Gets real names like "Levi Daniels"');
   console.log('🎯 2. FIXED Webhook Frequency - Sends ONCE only (not every 2 minutes)');
   console.log('🎯 3. FIXED Webhook Format - ALL users in ONE webhook call');
-  console.log('\n🔍 TEST THE BATCH PROCESSING:');
-  console.log('=============================');
+  console.log('🎯 4. UPDATED Webhook URL - Now using webhook-test endpoint');
+  console.log('\n🔗 WEBHOOK CONFIGURATION:');
+  console.log('=========================');
+  console.log(`✅ OLD URL: https://n8n.srv470812.hstgr.cloud/webhook/workspace-url-n8n`);
+  console.log(`🎯 NEW URL: ${N8N_WEBHOOK_URL}`);
+  console.log(`✅ Format: BATCH - All users in ONE webhook call`);
+  console.log('\n🔍 TEST THE UPDATED WEBHOOK:');
+  console.log('============================');
   console.log('1. Check all users: GET  /api/debug/allUsers');  
   console.log('2. Test user lookup: GET  /api/debug/fixedUserLookup/aLfYIu7-TthUmwrm');
-  console.log('3. Manual batch sync: POST /api/sync/now');
-  console.log('\n🎉 BATCH CONFIGURATION:');
-  console.log('=======================');
+  console.log('3. Manual batch sync to NEW webhook: POST /api/sync/now');
+  console.log('\n🎉 UPDATED CONFIGURATION:');
+  console.log('=========================');
   console.log(`✅ Send Once: ${SEND_ONCE_ON_STARTUP}`);
   console.log(`✅ Recurring: ${SEND_RECURRING}`);
-  console.log(`✅ Format: BATCH - All users in ONE webhook`);
-  console.log(`✅ Webhook: ${N8N_WEBHOOK_URL}`);
+  console.log(`✅ Batch Processing: Enabled`);
+  console.log(`✅ Target: webhook-test endpoint`);
   
-  // 🚀 FIXED: Send data ONCE on startup (if enabled)
+  // 🚀 FIXED: Send data ONCE on startup to UPDATED webhook (if enabled)
   if (SEND_ONCE_ON_STARTUP) {
     setTimeout(() => {
-      console.log('\n🚀 [STARTUP] Running SINGLE BATCH sync with FIXED usernames...');
-      console.log('🎯 ALL users will be sent in ONE webhook call to n8n!');
+      console.log('\n🚀 [STARTUP] Running SINGLE BATCH sync to UPDATED webhook...');
+      console.log(`🎯 ALL users will be sent to: ${N8N_WEBHOOK_URL}`);
+      console.log('🔄 Webhook format: ONE batch call (not individual calls)');
       syncAllUsersToN8N();
     }, 10000); // Wait 10 seconds for server to fully start
   } else {
     console.log('\n⏸️ One-time sync disabled. Use POST /api/sync/now to manually trigger');
   }
   
-  console.log('\n🎯 Server ready! ALL users with real names will be sent in ONE webhook call!');
+  console.log('\n🎯 Server ready! ALL users will be sent to UPDATED webhook with real names!');
 });
 
 module.exports = app;
