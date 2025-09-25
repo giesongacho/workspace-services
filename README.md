@@ -1,6 +1,6 @@
 # TimeDoctor API Server
 
-A comprehensive REST API server that connects to TimeDoctor and automatically fetches **ALL DATA** without limits using smart pagination. Now includes **COMPLETE API COVERAGE** with all TimeDoctor endpoints!
+A comprehensive REST API server that connects to TimeDoctor and automatically fetches **ALL DATA** without limits using smart pagination. Now includes **COMPLETE API COVERAGE** with all TimeDoctor endpoints + **N8N USER LOOKUP** for resolving "Unknown" emails!
 
 ---
 
@@ -13,6 +13,13 @@ A comprehensive REST API server that connects to TimeDoctor and automatically fe
 - **Activity Analytics** - Comprehensive activity tracking
 - **File Management** - Complete file operations
 - **Time Tracking** - Detailed time tracking data
+
+### 🔍 **NEW: N8N User Lookup System**
+- **Resolve "Unknown" Emails** - Get real names and emails from userIds
+- **Single User Lookup** - `/api/n8n/lookupUser/:userId`
+- **Batch User Lookup** - `/api/n8n/lookupUsers` for multiple users
+- **Data Enrichment** - Transform monitoring data with real user info
+- **User Mapping** - Complete userId → userInfo lookup table
 
 ### ✨ **Automatic Full Data Retrieval**
 - **NO LIMITS** - Automatically fetches ALL records
@@ -76,6 +83,86 @@ curl http://localhost:3000/api/health
 ## Base URL
 ```
 http://localhost:3000/api
+```
+
+---
+
+## 🔍 **NEW: N8N User Lookup Endpoints**
+
+### Resolve "Unknown" Emails from N8N Data
+
+When n8n receives monitoring data with `"email": "Unknown"` but a valid `userId`, use these endpoints to get the real user information:
+
+#### Single User Lookup
+- **GET** `/api/n8n/lookupUser/:userId` - Get real name and email for one user
+  
+**Example:**
+```bash
+curl http://localhost:3000/api/n8n/lookupUser/aLfYIu7-TthUmwrm
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "userId": "aLfYIu7-TthUmwrm",
+    "realName": "John Doe",
+    "realEmail": "john.doe@company.com",
+    "timezone": "America/New_York",
+    "role": "user",
+    "status": "active"
+  }
+}
+```
+
+#### Batch User Lookup
+- **POST** `/api/n8n/lookupUsers` - Lookup multiple users at once
+
+**Example:**
+```bash
+curl -X POST http://localhost:3000/api/n8n/lookupUsers \
+  -H "Content-Type: application/json" \
+  -d '{"userIds": ["aLfYIu7-TthUmwrm", "another-user-id"]}'
+```
+
+#### Enrich Monitoring Data
+- **POST** `/api/n8n/enrichMonitoringData` - Transform n8n data with real user info
+
+**Example:**
+```javascript
+const monitoringData = {
+  body: {
+    user: {
+      userId: "aLfYIu7-TthUmwrm",
+      email: "Unknown",
+      deviceName: "Computer-TthUmwrm"
+    }
+  }
+};
+
+const response = await fetch('/api/n8n/enrichMonitoringData', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify(monitoringData)
+});
+
+// Returns same structure but with:
+// realEmail: "john.doe@company.com"
+// realName: "John Doe"
+```
+
+#### User Mapping for N8N Caching
+- **GET** `/api/n8n/userMap` - Get complete userId → userInfo mapping
+
+**Example:**
+```javascript
+// Cache this in n8n for fast lookups
+const userMap = await fetch('/api/n8n/userMap').then(r => r.json());
+
+// Then use: userMap.data.userMap[userId] to get user details instantly
+const user = userMap.data.userMap["aLfYIu7-TthUmwrm"];
+console.log(`${user.name} <${user.email}>`); // John Doe <john.doe@company.com>
 ```
 
 ---
@@ -175,6 +262,58 @@ http://localhost:3000/api
 
 ## 📖 Usage Examples
 
+### N8N User Lookup Examples
+
+#### Resolve Single "Unknown" Email
+```javascript
+// When n8n receives userId but "Unknown" email
+const userId = "aLfYIu7-TthUmwrm";
+const response = await fetch(`http://localhost:3000/api/n8n/lookupUser/${userId}`);
+const userData = await response.json();
+
+console.log(`Real name: ${userData.data.realName}`);
+console.log(`Real email: ${userData.data.realEmail}`);
+// Output: Real name: John Doe
+//         Real email: john.doe@company.com
+```
+
+#### Batch Lookup for Multiple Users
+```javascript
+const userIds = ["aLfYIu7-TthUmwrm", "bNgZKw8-UuiVnxsn"];
+const response = await fetch('http://localhost:3000/api/n8n/lookupUsers', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({ userIds })
+});
+
+const result = await response.json();
+result.data.users.forEach(user => {
+  console.log(`${user.userId} = ${user.realName} <${user.realEmail}>`);
+});
+```
+
+#### Cache User Map in N8N
+```javascript
+// Step 1: Get and cache the user map
+const userMapResponse = await fetch('http://localhost:3000/api/n8n/userMap');
+const userMapData = await userMapResponse.json();
+const userMap = userMapData.data.userMap;
+
+// Step 2: Use cached map for instant lookups
+function getUserInfo(userId) {
+  const user = userMap[userId];
+  return user ? {
+    name: user.name,
+    email: user.email,
+    timezone: user.timezone
+  } : null;
+}
+
+// Step 3: Fast lookups without API calls
+const user = getUserInfo("aLfYIu7-TthUmwrm");
+console.log(`${user.name} <${user.email}>`); // Instant response!
+```
+
 ### JavaScript (Fetch API)
 
 ```javascript
@@ -234,39 +373,26 @@ async function getAllData() {
   }
 }
 
-// Create new user invitation
-async function inviteUser(email, name, role = 'user') {
+// Resolve "Unknown" emails from n8n data
+async function resolveUnknownEmails(userIds) {
   try {
-    const response = await axios.post('http://localhost:3000/api/invite', {
-      email,
-      name,
-      role
+    const response = await axios.post('http://localhost:3000/api/n8n/lookupUsers', {
+      userIds: userIds
     });
-    console.log('User invited successfully:', response.data);
-    return response.data;
+    
+    console.log('Resolved users:');
+    response.data.data.users.forEach(user => {
+      console.log(`${user.userId}: ${user.realName} <${user.realEmail}>`);
+    });
+    
+    return response.data.data.users;
   } catch (error) {
-    console.error('Error inviting user:', error.message);
+    console.error('Error resolving users:', error.message);
   }
 }
 
-// Get comprehensive activity data
-async function getActivityData(userId, fromDate, toDate) {
-  try {
-    const [worklog, timeuse, stats] = await Promise.all([
-      axios.get(`http://localhost:3000/api/getActivityWorklog?user=${userId}&from=${fromDate}&to=${toDate}`),
-      axios.get(`http://localhost:3000/api/getActivityTimeuse?user=${userId}&from=${fromDate}&to=${toDate}`),
-      axios.get(`http://localhost:3000/api/timeuseStats?user=${userId}&from=${fromDate}&to=${toDate}`)
-    ]);
-    
-    return {
-      worklog: worklog.data,
-      timeuse: timeuse.data,
-      stats: stats.data
-    };
-  } catch (error) {
-    console.error('Error fetching activity data:', error.message);
-  }
-}
+// Usage
+resolveUnknownEmails(["aLfYIu7-TthUmwrm", "bNgZKw8-UuiVnxsn"]);
 ```
 
 ### Python
@@ -274,42 +400,63 @@ async function getActivityData(userId, fromDate, toDate) {
 ```python
 import requests
 
+# Resolve "Unknown" email to real user data
+def lookup_user(user_id):
+    response = requests.get(f'http://localhost:3000/api/n8n/lookupUser/{user_id}')
+    if response.ok:
+        user = response.json()['data']
+        print(f"User ID: {user['userId']}")
+        print(f"Real Name: {user['realName']}")
+        print(f"Real Email: {user['realEmail']}")
+        return user
+    else:
+        print(f"Error: {response.json()['error']}")
+        return None
+
+# Batch lookup multiple users
+def batch_lookup_users(user_ids):
+    response = requests.post('http://localhost:3000/api/n8n/lookupUsers', 
+                           json={'userIds': user_ids})
+    if response.ok:
+        users = response.json()['data']['users']
+        for user in users:
+            print(f"{user['userId']} = {user['realName']} <{user['realEmail']}>")
+        return users
+    else:
+        print(f"Error: {response.json()['error']}")
+        return []
+
 # Get ALL users automatically
 response = requests.get('http://localhost:3000/api/getUsers')
 users = response.json()
 print(f"Retrieved ALL {users['count']} users!")
 
-# Create new task
-task_data = {
-    'name': 'Python API Task',
-    'description': 'Created via Python',
-    'project': 'PROJECT_ID'
-}
-response = requests.post('http://localhost:3000/api/newTask', json=task_data)
-task = response.json()
-print(f"Task created: {task}")
-
-# Get file data
-response = requests.get('http://localhost:3000/api/getFiles')
-files = response.json()
-print(f"Retrieved {files['count']} files!")
-
-# Get activity analytics
-params = {
-    'from': '2025-09-01',
-    'to': '2025-09-23',
-    'user': 'USER_ID'
-}
-response = requests.get('http://localhost:3000/api/getActivityWorklog', params=params)
-worklog = response.json()
-print(f"Worklog entries: {worklog['count']}")
+# Example usage
+lookup_user("aLfYIu7-TthUmwrm")
+batch_lookup_users(["aLfYIu7-TthUmwrm", "bNgZKw8-UuiVnxsn"])
 ```
 
 ---
 
 ## 🧪 Testing with Postman
 
-A complete Postman testing guide is provided above with all 37 endpoints. Here are the key testing scenarios:
+### N8N User Lookup Testing
+
+1. **Single User Lookup Test:**
+   - Method: `GET`
+   - URL: `http://localhost:3000/api/n8n/lookupUser/aLfYIu7-TthUmwrm`
+   - Expected: Real name and email for the user
+
+2. **Batch Lookup Test:**
+   - Method: `POST`
+   - URL: `http://localhost:3000/api/n8n/lookupUsers`
+   - Body: `{"userIds": ["aLfYIu7-TthUmwrm", "another-user-id"]}`
+   - Expected: Array of resolved users
+
+3. **User Map Caching Test:**
+   - Method: `GET`
+   - URL: `http://localhost:3000/api/n8n/userMap`
+   - Expected: Complete userId → userInfo mapping
 
 ### Basic Flow Testing
 1. **Health Check** → **Auth Status** → **Get Users**
@@ -322,6 +469,7 @@ A complete Postman testing guide is provided above with all 37 endpoints. Here a
 - **Activity Analytics**: Compare different activity endpoints
 - **File Management**: Full file lifecycle testing
 - **Time Tracking**: Comprehensive time data analysis
+- **N8N Integration**: Test all user lookup scenarios
 
 ---
 
@@ -362,12 +510,20 @@ All endpoints return a consistent JSON response format:
 }
 ```
 
-### Success Response (single item)
+### N8N User Lookup Response
 ```json
 {
   "success": true,
   "data": {
-    // Single object data
+    "userId": "aLfYIu7-TthUmwrm",
+    "realName": "John Doe",
+    "realEmail": "john.doe@company.com",
+    "timezone": "America/New_York",
+    "role": "user",
+    "status": "active"
+  },
+  "n8nIntegration": {
+    "usage": "Use realName and realEmail in your n8n workflow"
   }
 }
 ```
@@ -387,13 +543,14 @@ All endpoints return a consistent JSON response format:
 | Category | Endpoints | Description |
 |----------|-----------|-------------|
 | **Authentication** | 4 | Health, auth status, token management |
+| **N8N User Lookup** | 4 | Resolve "Unknown" emails, batch lookup, enrichment |
 | **User Management** | 6 | Full CRUD + invitations + activity |
 | **Task Management** | 4 | Full CRUD operations for tasks |
 | **Activity Analytics** | 8 | Comprehensive activity tracking |
 | **File Management** | 6 | Complete file operations |
 | **Projects & Time** | 4 | Projects, work logs, time tracking |
 | **Advanced Features** | 3 | Filtering, summaries, analytics |
-| **Total Coverage** | **37** | **Complete TimeDoctor API** |
+| **Total Coverage** | **39** | **Complete TimeDoctor API + N8N Integration** |
 
 ---
 
@@ -401,20 +558,45 @@ All endpoints return a consistent JSON response format:
 
 | Feature | Description |
 |---------|-------------|
-| **Complete API Coverage** | All 37 TimeDoctor endpoints implemented |
+| **Complete API Coverage** | All 37 TimeDoctor endpoints + 4 N8N lookup endpoints |
+| **N8N User Lookup** | Resolve "Unknown" emails to real user data |
+| **Batch Processing** | Lookup multiple users at once |
+| **Data Enrichment** | Transform monitoring data with real names/emails |
+| **User Mapping** | Complete userId → userInfo lookup table for caching |
 | **No Pagination Limits** | ALL data is fetched automatically |
 | **Auto Token Refresh** | Never fails due to expired tokens |
 | **Smart Error Handling** | Detailed error messages and retry logic |
 | **Complete CRUD Operations** | Create, read, update, delete for all entities |
 | **Comprehensive Analytics** | Full activity and time tracking data |
 | **File Management** | Upload, download, organize files |
-| **User Management** | Complete user lifecycle management |
-| **Task Management** | Full task operations |
 | **Real-time Data** | Always up-to-date information |
 
 ---
 
 ## 🛠️ Troubleshooting
+
+### N8N User Lookup Issues
+
+**"User not found" errors:**
+- Verify the userId exists in TimeDoctor
+- Check if user has been deleted or archived
+- Ensure API has permission to access user data
+
+**Getting "Unknown" emails in n8n:**
+```javascript
+// Instead of using the "Unknown" email directly:
+const monitoringData = {
+  user: {
+    userId: "aLfYIu7-TthUmwrm",
+    email: "Unknown"  // Don't use this!
+  }
+};
+
+// Use the lookup endpoint to get real data:
+const realUser = await fetch(`/api/n8n/lookupUser/${monitoringData.user.userId}`);
+const userData = await realUser.json();
+console.log(userData.data.realEmail); // "john.doe@company.com"
+```
 
 ### Common Issues
 
@@ -440,11 +622,12 @@ Large datasets take time. The console shows progress:
 
 ## 📈 Performance Tips
 
-1. **Use Date Ranges**: Specify `from` and `to` dates for better performance
-2. **Filter Results**: Use user, project filters to reduce data size
-3. **Monitor Console**: Watch server logs for API call details
-4. **Cache Results**: Store frequently accessed data locally
-5. **Batch Operations**: Use bulk endpoints when available
+1. **Use N8N User Map**: Cache the user map in n8n for instant lookups
+2. **Batch Lookups**: Use batch lookup endpoint for multiple users
+3. **Use Date Ranges**: Specify `from` and `to` dates for better performance
+4. **Filter Results**: Use user, project filters to reduce data size
+5. **Monitor Console**: Watch server logs for API call details
+6. **Cache Results**: Store frequently accessed data locally
 
 ---
 
@@ -462,4 +645,6 @@ ISC License
 
 ---
 
-**🎉 You now have COMPLETE TimeDoctor API coverage with 37 endpoints, automatic pagination, token management, and comprehensive testing capabilities!**
+**🎉 You now have COMPLETE TimeDoctor API coverage with 39 endpoints, including N8N user lookup to resolve "Unknown" emails, automatic pagination, token management, and comprehensive testing capabilities!**
+
+**🔥 Perfect for N8N workflows that need to resolve user identities from monitoring data!**
