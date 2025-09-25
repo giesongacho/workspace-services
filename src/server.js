@@ -27,6 +27,347 @@ app.use((req, res, next) => {
   next();
 });
 
+// ==================== N8N USER LOOKUP HELPERS ====================
+
+/**
+ * @route   GET /api/n8n/lookupUser/:userId
+ * @desc    Get real user name and email when you have userId but email shows "Unknown"
+ * @param   userId - The user ID from n8n data
+ * 
+ * This endpoint is specifically designed for n8n workflows where you get monitoring
+ * data with "Unknown" emails but valid userIds. It returns the real user details.
+ */
+app.get('/api/n8n/lookupUser/:userId', async (req, res) => {
+  try {
+    const userId = req.params.userId;
+    
+    if (!userId || userId === 'undefined') {
+      return res.status(400).json({
+        success: false,
+        error: 'User ID is required',
+        example: 'GET /api/n8n/lookupUser/aLfYIu7-TthUmwrm'
+      });
+    }
+
+    console.log(`🔍 N8N User lookup requested for: ${userId}`);
+    
+    // Get user details from TimeDoctor API
+    const userDetails = await api.getUser(userId);
+    
+    // Extract the essential info for n8n
+    const lookupResult = {
+      userId: userId,
+      realName: userDetails.name || 'Name not available',
+      realEmail: userDetails.email || 'Email not available',
+      timezone: userDetails.timezone || 'Unknown',
+      role: userDetails.role || 'Unknown',
+      status: userDetails.status || 'Unknown',
+      fullUserData: userDetails // Complete user object for reference
+    };
+    
+    console.log(`✅ Found user: ${lookupResult.realName} (${lookupResult.realEmail})`);
+    
+    res.json({
+      success: true,
+      message: `User lookup successful for ${userId}`,
+      data: lookupResult,
+      n8nIntegration: {
+        usage: 'Use realName and realEmail in your n8n workflow instead of "Unknown" values',
+        example: {
+          originalData: {
+            email: "Unknown",
+            userId: userId
+          },
+          resolvedData: {
+            email: lookupResult.realEmail,
+            name: lookupResult.realName,
+            userId: userId
+          }
+        }
+      }
+    });
+  } catch (error) {
+    console.error(`❌ N8N User lookup error for ${req.params.userId}:`, error.message);
+    res.status(error.message.includes('Not Found') ? 404 : 500).json({
+      success: false,
+      error: error.message,
+      userId: req.params.userId,
+      troubleshooting: [
+        'Verify the userId exists in TimeDoctor',
+        'Check if user has been deleted or archived',
+        'Ensure API has permission to access user data'
+      ]
+    });
+  }
+});
+
+/**
+ * @route   POST /api/n8n/lookupUsers
+ * @desc    Batch lookup multiple users by their IDs (for n8n bulk processing)
+ * @body    { userIds: ["userId1", "userId2", ...] }
+ * 
+ * Perfect for n8n workflows that need to resolve multiple "Unknown" emails at once.
+ */
+app.post('/api/n8n/lookupUsers', async (req, res) => {
+  try {
+    const userIds = req.body.userIds;
+    
+    if (!userIds || !Array.isArray(userIds) || userIds.length === 0) {
+      return res.status(400).json({
+        success: false,
+        error: 'userIds array is required',
+        example: {
+          userIds: ["aLfYIu7-TthUmwrm", "another-user-id"]
+        }
+      });
+    }
+
+    console.log(`🔍 N8N Batch user lookup requested for ${userIds.length} users`);
+    
+    const lookupResults = [];
+    const errors = [];
+    
+    // Process each userId
+    for (const userId of userIds) {
+      try {
+        if (!userId || userId === 'undefined') {
+          errors.push({ userId, error: 'Invalid user ID' });
+          continue;
+        }
+        
+        console.log(`🔍 Looking up user: ${userId}`);
+        const userDetails = await api.getUser(userId);
+        
+        lookupResults.push({
+          userId: userId,
+          realName: userDetails.name || 'Name not available',
+          realEmail: userDetails.email || 'Email not available',
+          timezone: userDetails.timezone || 'Unknown',
+          role: userDetails.role || 'Unknown',
+          status: userDetails.status || 'Unknown'
+        });
+        
+        console.log(`✅ Found: ${userDetails.name} (${userDetails.email})`);
+        
+        // Small delay to avoid overwhelming API
+        await new Promise(resolve => setTimeout(resolve, 100));
+        
+      } catch (error) {
+        console.error(`❌ Error looking up user ${userId}:`, error.message);
+        errors.push({ 
+          userId, 
+          error: error.message 
+        });
+      }
+    }
+    
+    res.json({
+      success: true,
+      message: `Batch lookup completed: ${lookupResults.length} successful, ${errors.length} errors`,
+      data: {
+        users: lookupResults,
+        errors: errors,
+        summary: {
+          totalRequested: userIds.length,
+          successful: lookupResults.length,
+          failed: errors.length
+        }
+      },
+      n8nIntegration: {
+        usage: 'Loop through the users array to get realName and realEmail for each userId',
+        example: 'users.forEach(user => console.log(`${user.userId} = ${user.realName} <${user.realEmail}>`))'
+      }
+    });
+  } catch (error) {
+    console.error('❌ N8N Batch lookup error:', error.message);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+/**
+ * @route   POST /api/n8n/enrichMonitoringData
+ * @desc    Enrich n8n monitoring data by replacing "Unknown" emails with real user data
+ * @body    Complete n8n monitoring payload (like from your screenshot)
+ * 
+ * This endpoint takes the exact JSON structure you showed in the screenshot
+ * and returns the same structure but with real user names and emails.
+ */
+app.post('/api/n8n/enrichMonitoringData', async (req, res) => {
+  try {
+    const monitoringData = req.body;
+    
+    if (!monitoringData || !monitoringData.body || !monitoringData.body.user) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid monitoring data structure',
+        expectedFormat: {
+          body: {
+            user: {
+              userId: "user-id-here",
+              email: "Unknown",
+              deviceName: "Computer-xyz"
+            }
+          }
+        }
+      });
+    }
+
+    const userId = monitoringData.body.user.userId;
+    
+    if (!userId || userId === 'undefined') {
+      return res.status(400).json({
+        success: false,
+        error: 'userId not found in monitoring data'
+      });
+    }
+
+    console.log(`🔧 N8N Data enrichment requested for user: ${userId}`);
+    
+    try {
+      // Get real user details
+      const userDetails = await api.getUser(userId);
+      
+      // Create enriched monitoring data
+      const enrichedData = JSON.parse(JSON.stringify(monitoringData)); // Deep copy
+      
+      // Replace "Unknown" email with real email
+      enrichedData.body.user.realEmail = userDetails.email || 'Email not available';
+      enrichedData.body.user.realName = userDetails.name || 'Name not available';
+      enrichedData.body.user.timezone = userDetails.timezone || 'Unknown';
+      enrichedData.body.user.role = userDetails.role || 'Unknown';
+      enrichedData.body.user.status = userDetails.status || 'Unknown';
+      
+      // Keep original data for reference
+      enrichedData.body.user.originalEmail = monitoringData.body.user.email;
+      enrichedData.body.user.originalDeviceName = monitoringData.body.user.deviceName;
+      
+      // Add enrichment metadata
+      enrichedData.enrichmentInfo = {
+        enrichedAt: new Date().toISOString(),
+        source: 'workspace-services-n8n-enrichment',
+        originalEmailWasUnknown: monitoringData.body.user.email === 'Unknown',
+        userFound: true,
+        realUserData: {
+          name: userDetails.name,
+          email: userDetails.email,
+          timezone: userDetails.timezone,
+          role: userDetails.role
+        }
+      };
+      
+      console.log(`✅ Enriched data for: ${userDetails.name} (${userDetails.email})`);
+      
+      res.json({
+        success: true,
+        message: `Monitoring data enriched successfully for user ${userId}`,
+        data: enrichedData,
+        summary: {
+          userId: userId,
+          originalEmail: monitoringData.body.user.email,
+          realName: userDetails.name,
+          realEmail: userDetails.email,
+          wasUnknown: monitoringData.body.user.email === 'Unknown'
+        }
+      });
+      
+    } catch (userError) {
+      console.error(`❌ User not found: ${userId}`, userError.message);
+      
+      // Return original data with error info
+      const errorEnrichedData = JSON.parse(JSON.stringify(monitoringData));
+      errorEnrichedData.enrichmentInfo = {
+        enrichedAt: new Date().toISOString(),
+        source: 'workspace-services-n8n-enrichment',
+        userFound: false,
+        error: userError.message,
+        originalEmailWasUnknown: monitoringData.body.user.email === 'Unknown'
+      };
+      
+      res.status(404).json({
+        success: false,
+        error: `User not found: ${userId}`,
+        data: errorEnrichedData,
+        message: 'Returned original data with error information'
+      });
+    }
+  } catch (error) {
+    console.error('❌ N8N Data enrichment error:', error.message);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+/**
+ * @route   GET /api/n8n/userMap
+ * @desc    Get a complete userId -> userInfo mapping for all users
+ * 
+ * Creates a lookup table that n8n can cache and use for fast user resolutions.
+ * Perfect for workflows that need to resolve many "Unknown" emails quickly.
+ */
+app.get('/api/n8n/userMap', async (req, res) => {
+  try {
+    console.log('🗺️ N8N User map generation requested');
+    
+    // Get all users
+    const allUsers = await api.getUsers({ limit: 1000 }); // Get all users
+    
+    if (!allUsers.data || allUsers.data.length === 0) {
+      return res.json({
+        success: true,
+        message: 'No users found',
+        data: {
+          userMap: {},
+          totalUsers: 0
+        }
+      });
+    }
+    
+    // Create userId -> userInfo mapping
+    const userMap = {};
+    
+    allUsers.data.forEach(user => {
+      userMap[user.id] = {
+        name: user.name || 'Name not available',
+        email: user.email || 'Email not available',
+        timezone: user.timezone || 'Unknown',
+        role: user.role || 'Unknown',
+        status: user.status || 'Unknown',
+        deviceName: user.name || 'Unknown Device' // Use name as device fallback
+      };
+    });
+    
+    console.log(`✅ Generated user map with ${Object.keys(userMap).length} users`);
+    
+    res.json({
+      success: true,
+      message: `User mapping generated for ${Object.keys(userMap).length} users`,
+      data: {
+        userMap: userMap,
+        totalUsers: Object.keys(userMap).length,
+        generatedAt: new Date().toISOString()
+      },
+      n8nIntegration: {
+        usage: 'Cache this userMap in n8n and use: userMap[userId] to get user details',
+        example: {
+          lookup: 'const user = userMap["aLfYIu7-TthUmwrm"];',
+          result: 'user.name, user.email, user.timezone, etc.'
+        }
+      }
+    });
+  } catch (error) {
+    console.error('❌ N8N User map generation error:', error.message);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
 // ==================== N8N WEBHOOK FUNCTIONS ====================
 
 /**
@@ -296,7 +637,11 @@ app.get('/api/n8n/status', (req, res) => {
         'Activity tracking details',
         'Screenshot metadata',
         'Productivity statistics',
-        'Manual sync triggers'
+        'Manual sync triggers',
+        'User lookup for "Unknown" email resolution',
+        'Batch user lookups for bulk processing',
+        'Complete user mapping for n8n caching',
+        'Monitoring data enrichment'
       ]
     }
   });
@@ -457,13 +802,19 @@ app.put('/api/n8n/webhook-url', (req, res) => {
 app.get('/api/health', (req, res) => {
   res.json({
     status: 'ok',
-    message: 'TimeDoctor API Server with n8n Integration is running',
+    message: 'TimeDoctor API Server with n8n Integration + User Lookup is running',
     timestamp: new Date().toISOString(),
     n8nIntegration: {
       enabled: true,
       webhookUrl: N8N_WEBHOOK_URL,
       syncInterval: MONITORING_INTERVAL,
-      syncIntervalDescription: 'Every 2 minutes'
+      syncIntervalDescription: 'Every 2 minutes',
+      userLookupEndpoints: [
+        'GET /api/n8n/lookupUser/:userId - Single user lookup',
+        'POST /api/n8n/lookupUsers - Batch user lookup', 
+        'POST /api/n8n/enrichMonitoringData - Enrich monitoring data',
+        'GET /api/n8n/userMap - Complete user mapping'
+      ]
     }
   });
 });
@@ -1468,12 +1819,18 @@ app.use((req, res) => {
       'POST /api/auth/refresh',
       'DELETE /api/auth/cache',
       
-      // N8N INTEGRATION ENDPOINTS (NEW)
+      // N8N INTEGRATION ENDPOINTS
       'GET /api/n8n/status - n8n integration status',
       'POST /api/n8n/sync - Manual sync all users to n8n',
       'POST /api/n8n/sync-user/:userId - Manual sync specific user to n8n',
       'POST /api/n8n/test - Test n8n webhook connectivity',
       'PUT /api/n8n/webhook-url - Update webhook URL (runtime)',
+      
+      // N8N USER LOOKUP ENDPOINTS (NEW!)
+      'GET /api/n8n/lookupUser/:userId - Single user lookup for "Unknown" emails',
+      'POST /api/n8n/lookupUsers - Batch user lookup (body: {userIds: []})',
+      'POST /api/n8n/enrichMonitoringData - Enrich monitoring data with real user info',
+      'GET /api/n8n/userMap - Complete userId -> userInfo mapping for n8n caching',
       
       // MONITORING ENDPOINTS
       'GET /api/monitorUser/:userId?includeScreenshots=true - COMPREHENSIVE USER MONITORING WITH IMAGES',
@@ -1542,8 +1899,8 @@ app.use((err, req, res, next) => {
 // ==================== START SERVER ====================
 
 app.listen(PORT, () => {
-  console.log('\n🚀 TimeDoctor API Server with Enhanced n8n Integration (2-Minute Sync)');
-  console.log('======================================================================');
+  console.log('\n🚀 TimeDoctor API Server with Enhanced n8n Integration + User Lookup');
+  console.log('=========================================================================');
   console.log(`📡 Server running on: http://localhost:${PORT}`);
   console.log(`📧 Email: ${config.credentials.email}`);
   console.log(`🏢 Company: ${config.credentials.companyName}`);
@@ -1553,6 +1910,17 @@ app.listen(PORT, () => {
   console.log(`⏰ Sync Interval: Every 2 minutes (${MONITORING_INTERVAL})`);
   console.log(`⚡ Faster Updates: More frequent monitoring (changed from 5 minutes)`);
   console.log('📊 Data Format: Individual user records + summary');
+  console.log('\n🔍 NEW: N8N USER LOOKUP ENDPOINTS');
+  console.log('==================================');
+  console.log('📋 GET  /api/n8n/lookupUser/:userId - Single user lookup');
+  console.log('📋 POST /api/n8n/lookupUsers - Batch user lookup');
+  console.log('📋 POST /api/n8n/enrichMonitoringData - Enrich monitoring data');
+  console.log('📋 GET  /api/n8n/userMap - Complete user mapping');
+  console.log('\n💡 USER LOOKUP USAGE:');
+  console.log('  1️⃣ Single lookup: GET /api/n8n/lookupUser/aLfYIu7-TthUmwrm');
+  console.log('  2️⃣ Batch lookup: POST /api/n8n/lookupUsers {userIds: ["id1","id2"]}');
+  console.log('  3️⃣ Enrich data: POST /api/n8n/enrichMonitoringData {monitoring data}');
+  console.log('  4️⃣ Cache map: GET /api/n8n/userMap (cache in n8n for fast lookups)');
   console.log('\n🔧 n8n Troubleshooting Endpoints:');
   console.log('  📋 GET  /api/n8n/status - Integration status');
   console.log('  🔄 POST /api/n8n/sync - Manual sync all users');
@@ -1561,25 +1929,17 @@ app.listen(PORT, () => {
   console.log('  🔧 PUT  /api/n8n/webhook-url - Update webhook URL');
   console.log('\n🎯 Enhanced Features:');
   console.log('  ⚡ FASTER SYNC: Every 2 minutes instead of 5 minutes');
+  console.log('  🔍 USER LOOKUP: Resolve "Unknown" emails to real user data');
+  console.log('  📦 BATCH PROCESSING: Lookup multiple users at once');
+  console.log('  🚀 ENRICHMENT: Transform monitoring data with real names/emails');
+  console.log('  🗺️ USER MAPPING: Complete userId -> userInfo lookup table');
   console.log('  ✅ Reduced delay between user requests (500ms vs 1000ms)');
   console.log('  ✅ Detailed error logging and diagnostics');
-  console.log('  ✅ Webhook URL validation and testing');
-  console.log('  ✅ Runtime webhook URL configuration');
-  console.log('  ✅ Connection timeout handling');
-  console.log('  ✅ Response time measurement');
-  console.log('  ✅ Troubleshooting guidance');
-  console.log('\n💡 TROUBLESHOOTING STEPS:');
-  console.log('  1️⃣ Test webhook: POST /api/n8n/test');
-  console.log('  2️⃣ Check n8n workflow is active');
-  console.log('  3️⃣ Verify webhook trigger node exists');
-  console.log('  4️⃣ Confirm webhook path matches');
-  console.log('  5️⃣ Check server logs for detailed errors');
-  console.log('\n⚡ FASTER MONITORING:');
-  console.log('  🚀 User data sent to n8n every 2 minutes');
-  console.log('  📊 More frequent updates for real-time monitoring');
-  console.log('  ⏰ 30x more data points per hour compared to 5-minute sync');
-  console.log('\n✅ Server ready! Test the webhook immediately with:');
-  console.log(`   curl -X POST http://localhost:${PORT}/api/n8n/test`);
+  console.log('\n🔥 SOLUTION FOR "UNKNOWN" EMAILS:');
+  console.log(`   curl http://localhost:${PORT}/api/n8n/lookupUser/aLfYIu7-TthUmwrm`);
+  console.log('   → Returns: realName, realEmail, timezone, role, status');
+  console.log('\n✅ Server ready! Test user lookup immediately with:');
+  console.log(`   curl http://localhost:${PORT}/api/n8n/lookupUser/YOUR_USER_ID`);
   console.log('\n🔥 Data will start flowing to n8n in 30 seconds, then every 2 minutes!');
 });
 
