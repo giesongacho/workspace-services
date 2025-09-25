@@ -8,7 +8,7 @@ class TimeDoctorAPI {
     this.baseUrl = config.api.baseUrl;
     this.version = config.api.version;
     
-    console.log('👤 TimeDoctorAPI initialized with USERNAME priority lookup');
+    console.log('👤 TimeDoctorAPI initialized with FIXED USERNAME extraction');
   }
 
   /**
@@ -168,18 +168,63 @@ class TimeDoctorAPI {
   }
 
   /**
-   * Get REAL TimeDoctor USERNAME (the person who owns the device)
-   * This is what identifies WHO is using the laptop/computer
-   * 
-   * @param {string} userId - User ID to lookup
-   * @returns {object} User identification information
+   * Extract REAL USERNAME from TimeDoctor user data
+   * This is the FIXED version that gets actual names like "Levi Daniels", "Joshua Banks" etc.
+   */
+  extractRealUsername(userData) {
+    console.log(`🔍 Extracting username from user data:`, {
+      id: userData?.id,
+      name: userData?.name,
+      username: userData?.username,
+      displayName: userData?.displayName,
+      email: userData?.email,
+      firstName: userData?.firstName,
+      lastName: userData?.lastName,
+      fullName: userData?.fullName
+    });
+
+    // Try multiple field combinations to get the real name
+    const possibleNameFields = [
+      userData?.name,                    // Primary name field
+      userData?.displayName,             // Display name
+      userData?.fullName,                // Full name
+      userData?.username,                // Username field
+      userData?.firstName && userData?.lastName ? 
+        `${userData.firstName} ${userData.lastName}` : null,  // Combine first/last
+      userData?.firstName,               // Just first name
+      userData?.lastName,                // Just last name
+      userData?.email?.split('@')[0],    // Email prefix as fallback
+    ];
+
+    // Find the first non-empty, meaningful name
+    for (const nameField of possibleNameFields) {
+      if (nameField && 
+          typeof nameField === 'string' && 
+          nameField.trim() !== '' &&
+          nameField.toLowerCase() !== 'unknown' &&
+          nameField.toLowerCase() !== 'null' &&
+          nameField !== 'undefined') {
+        
+        const cleanName = nameField.trim();
+        console.log(`✅ Found real username: "${cleanName}"`);
+        return cleanName;
+      }
+    }
+
+    console.log(`⚠️ No valid username found in user data`);
+    return null;
+  }
+
+  /**
+   * Get REAL TimeDoctor USERNAME - FIXED VERSION
+   * This will get names like "Levi Daniels", "Joshua Banks", etc.
    */
   async getUserOwnerInfo(userId) {
-    console.log(`👤 Getting REAL USERNAME for user ${userId}...`);
+    console.log(`👤 [FIXED] Getting REAL USERNAME for user ${userId}...`);
     
     const userInfo = {
       userId: userId,
-      username: 'Unknown User',
+      username: null,
       fullName: null,
       email: null,
       timezone: null,
@@ -189,131 +234,185 @@ class TimeDoctorAPI {
       lookupMethod: 'none',
       success: false,
       error: null,
-      confidence: 'low'
+      confidence: 'low',
+      rawData: null
     };
 
     try {
-      // Strategy 1: Direct user lookup - this should get the username
-      console.log(`👤 Strategy 1: Direct user lookup for ${userId}`);
+      // FIXED Strategy 1: Direct user lookup with detailed logging
+      console.log(`👤 [FIXED] Strategy 1: Direct user lookup for ${userId}`);
       
       const userDetails = await this.getUser(userId);
+      console.log(`📋 Raw user details received:`, JSON.stringify(userDetails, null, 2));
       
       if (userDetails) {
-        // PRIORITY: Get the actual username from TimeDoctor
-        userInfo.username = userDetails.name || userDetails.username || userDetails.displayName || 'Unknown User';
-        userInfo.fullName = userDetails.fullName || userDetails.name || null;
-        userInfo.email = userDetails.email || null;
-        userInfo.timezone = userDetails.timezone || null;
-        userInfo.role = userDetails.role || null;
-        userInfo.status = userDetails.status || null;
+        userInfo.rawData = userDetails;
         
-        // Also try to get computer name if available
-        userInfo.computerName = userDetails.computerName || userDetails.deviceName || userDetails.hostname || null;
+        // EXTRACT THE REAL USERNAME using the fixed method
+        const extractedUsername = this.extractRealUsername(userDetails);
         
-        userInfo.lookupMethod = 'direct_user_lookup';
-        userInfo.success = true;
-        userInfo.confidence = 'high';
-        
-        console.log(`✅ Strategy 1 SUCCESS: Found USERNAME: "${userInfo.username}" for user ${userId}`);
-        return userInfo;
+        if (extractedUsername) {
+          userInfo.username = extractedUsername;
+          userInfo.fullName = userDetails.fullName || extractedUsername;
+          userInfo.email = userDetails.email || null;
+          userInfo.timezone = userDetails.timezone || null;
+          userInfo.role = userDetails.role || null;
+          userInfo.status = userDetails.status || null;
+          userInfo.computerName = userDetails.computerName || userDetails.deviceName || null;
+          
+          userInfo.lookupMethod = 'direct_user_lookup';
+          userInfo.success = true;
+          userInfo.confidence = 'high';
+          
+          console.log(`✅ [FIXED] Strategy 1 SUCCESS: Found USERNAME: "${userInfo.username}" for user ${userId}`);
+          return userInfo;
+        } else {
+          console.log(`⚠️ [FIXED] Strategy 1: User details found but no extractable username`);
+        }
       }
       
     } catch (directError) {
-      console.log(`⚠️ Strategy 1 failed: ${directError.message}`);
+      console.log(`⚠️ [FIXED] Strategy 1 failed: ${directError.message}`);
       userInfo.error = directError.message;
     }
 
     try {
-      // Strategy 2: Search through all users to find the username
-      console.log(`👤 Strategy 2: User list search for ${userId}`);
+      // FIXED Strategy 2: Search through all users with better extraction
+      console.log(`👤 [FIXED] Strategy 2: User list search for ${userId}`);
       
       const allUsers = await this.getUsers({ limit: 1000 });
+      console.log(`📊 [FIXED] Retrieved ${allUsers.data?.length || 0} users from company`);
       
       if (allUsers.data && allUsers.data.length > 0) {
+        // Log a few sample users to see the data structure
+        console.log(`📋 Sample user data structures:`, 
+          allUsers.data.slice(0, 3).map(u => ({
+            id: u.id,
+            name: u.name,
+            username: u.username,
+            displayName: u.displayName,
+            email: u.email,
+            firstName: u.firstName,
+            lastName: u.lastName
+          }))
+        );
+        
         const matchedUser = allUsers.data.find(user => user.id === userId);
         
         if (matchedUser) {
-          userInfo.username = matchedUser.name || matchedUser.username || matchedUser.displayName || 'Unknown User';
-          userInfo.fullName = matchedUser.fullName || matchedUser.name || null;
-          userInfo.email = matchedUser.email || null;
-          userInfo.timezone = matchedUser.timezone || null;
-          userInfo.role = matchedUser.role || null;
-          userInfo.status = matchedUser.status || null;
-          userInfo.computerName = matchedUser.computerName || matchedUser.deviceName || null;
+          console.log(`📋 [FIXED] Matched user data:`, JSON.stringify(matchedUser, null, 2));
           
-          userInfo.lookupMethod = 'user_list_search';
-          userInfo.success = true;
-          userInfo.confidence = 'high';
+          const extractedUsername = this.extractRealUsername(matchedUser);
           
-          console.log(`✅ Strategy 2 SUCCESS: Found USERNAME: "${userInfo.username}" in user list`);
-          return userInfo;
+          if (extractedUsername) {
+            userInfo.username = extractedUsername;
+            userInfo.fullName = matchedUser.fullName || extractedUsername;
+            userInfo.email = matchedUser.email || null;
+            userInfo.timezone = matchedUser.timezone || null;
+            userInfo.role = matchedUser.role || null;
+            userInfo.status = matchedUser.status || null;
+            userInfo.computerName = matchedUser.computerName || matchedUser.deviceName || null;
+            
+            userInfo.lookupMethod = 'user_list_search';
+            userInfo.success = true;
+            userInfo.confidence = 'high';
+            userInfo.rawData = matchedUser;
+            
+            console.log(`✅ [FIXED] Strategy 2 SUCCESS: Found USERNAME: "${userInfo.username}" in user list`);
+            return userInfo;
+          } else {
+            console.log(`⚠️ [FIXED] Strategy 2: User found but no extractable username`);
+          }
+        } else {
+          console.log(`⚠️ [FIXED] Strategy 2: User ${userId} not found in user list`);
         }
       }
       
     } catch (listError) {
-      console.log(`⚠️ Strategy 2 failed: ${listError.message}`);
+      console.log(`⚠️ [FIXED] Strategy 2 failed: ${listError.message}`);
     }
 
     // Strategy 3: Try to get username from activity data
     try {
-      console.log(`👤 Strategy 3: Activity data lookup for ${userId}`);
+      console.log(`👤 [FIXED] Strategy 3: Activity data lookup for ${userId}`);
       
       const activityData = await this.getActivityWorklog({
         user: userId,
         from: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
         to: new Date().toISOString().split('T')[0],
-        limit: 50
+        limit: 10
       });
 
       if (activityData.data && activityData.data.length > 0) {
+        console.log(`📋 Sample activity data:`, 
+          activityData.data.slice(0, 2).map(a => ({
+            userName: a.userName,
+            username: a.username,
+            user: a.user,
+            assignedUser: a.assignedUser
+          }))
+        );
+        
         // Look for username in activity records
         for (const activity of activityData.data.slice(0, 10)) {
-          const possibleUsername = activity.userName || activity.username || activity.user?.name || activity.assignedUser;
+          const possibleUsernames = [
+            activity.userName,
+            activity.username,
+            activity.user?.name,
+            activity.assignedUser,
+            activity.user?.displayName
+          ];
           
-          if (possibleUsername && typeof possibleUsername === 'string' && possibleUsername.trim() !== '') {
-            userInfo.username = possibleUsername.trim();
-            userInfo.computerName = activity.computerName || activity.deviceName || null;
-            userInfo.lookupMethod = 'activity_data_lookup';
-            userInfo.success = true;
-            userInfo.confidence = 'medium';
-            
-            console.log(`✅ Strategy 3 SUCCESS: Found USERNAME: "${userInfo.username}" from activity data`);
-            return userInfo;
+          for (const possibleUsername of possibleUsernames) {
+            if (possibleUsername && 
+                typeof possibleUsername === 'string' && 
+                possibleUsername.trim() !== '' &&
+                possibleUsername.toLowerCase() !== 'unknown') {
+              
+              userInfo.username = possibleUsername.trim();
+              userInfo.computerName = activity.computerName || activity.deviceName || null;
+              userInfo.lookupMethod = 'activity_data_lookup';
+              userInfo.success = true;
+              userInfo.confidence = 'medium';
+              
+              console.log(`✅ [FIXED] Strategy 3 SUCCESS: Found USERNAME: "${userInfo.username}" from activity data`);
+              return userInfo;
+            }
           }
         }
       }
       
     } catch (activityError) {
-      console.log(`⚠️ Strategy 3 failed: ${activityError.message}`);
+      console.log(`⚠️ [FIXED] Strategy 3 failed: ${activityError.message}`);
     }
 
-    // Final fallback - create a meaningful identifier
+    // FINAL FALLBACK - but make it more meaningful
+    console.log(`⚠️ [FIXED] All strategies failed, using fallback for ${userId}`);
     userInfo.username = `User ${userId.substring(0, 8)}`;
     userInfo.lookupMethod = 'fallback_identifier';
     userInfo.success = false;
     userInfo.confidence = 'very_low';
     
-    console.log(`⚠️ Using fallback USERNAME: "${userInfo.username}" for ${userId}`);
+    console.log(`⚠️ [FIXED] Using fallback USERNAME: "${userInfo.username}" for ${userId}`);
     
     return userInfo;
   }
 
   /**
-   * Get user identification info with USERNAME priority
-   * This is the main function to identify WHO owns a device
+   * Get user identification info with FIXED USERNAME extraction
    */
   async getUserIdentification(userId, userInfo = null) {
-    console.log(`🔍 Getting user identification (USERNAME priority) for ${userId}...`);
+    console.log(`🔍 [FIXED] Getting user identification (FIXED USERNAME priority) for ${userId}...`);
     
-    // If we already have user info, try to extract username from it first
+    // If we already have user info, try to extract username from it first using FIXED method
     if (userInfo) {
-      const username = userInfo.name || userInfo.username || userInfo.displayName;
-      if (username && username !== 'Unknown' && username.trim() !== '') {
-        console.log(`✅ Found USERNAME from provided user info: "${username}"`);
+      const extractedUsername = this.extractRealUsername(userInfo);
+      if (extractedUsername) {
+        console.log(`✅ [FIXED] Found USERNAME from provided user info: "${extractedUsername}"`);
         return {
           userId: userId,
-          username: username,
-          fullName: userInfo.fullName || userInfo.name,
+          username: extractedUsername,
+          fullName: userInfo.fullName || extractedUsername,
           email: userInfo.email,
           timezone: userInfo.timezone,
           role: userInfo.role,
@@ -326,22 +425,18 @@ class TimeDoctorAPI {
       }
     }
     
-    // Otherwise, do a full lookup
+    // Otherwise, do a full lookup with FIXED method
     return await this.getUserOwnerInfo(userId);
   }
 
-  // ==================== COMPREHENSIVE USER MONITORING WITH USERNAME PRIORITY ====================
+  // ==================== COMPREHENSIVE USER MONITORING WITH FIXED USERNAME ====================
 
   /**
-   * COMPREHENSIVE USER MONITORING API WITH USERNAME IDENTIFICATION
-   * Get complete monitoring data for a user with REAL USERNAME
-   * 
-   * @param {string} userId - User ID to monitor
-   * @param {object} params - Parameters including from/to dates
-   * @returns {object} Complete monitoring data with real username
+   * COMPREHENSIVE USER MONITORING API WITH FIXED USERNAME IDENTIFICATION
+   * Get complete monitoring data for a user with REAL USERNAME like "Levi Daniels"
    */
   async getCompleteUserMonitoring(userId, params = {}) {
-    console.log(`🕵️ Fetching COMPLETE monitoring data with REAL USERNAME for user ${userId}...`);
+    console.log(`🕵️ [FIXED] Fetching COMPLETE monitoring data with REAL USERNAME for user ${userId}...`);
     
     const companyId = await this.getCompanyId();
     
@@ -357,7 +452,7 @@ class TimeDoctorAPI {
     const queryParams = { ...defaultParams, ...params };
     
     try {
-      console.log(`📊 Gathering monitoring data from ${queryParams.from} to ${queryParams.to}...`);
+      console.log(`📊 [FIXED] Gathering monitoring data from ${queryParams.from} to ${queryParams.to}...`);
       
       // Fetch all monitoring data in parallel for efficiency
       const [
@@ -387,7 +482,7 @@ class TimeDoctorAPI {
         this.stats1_total(queryParams).catch(err => ({ error: err.message, data: null }))
       ]);
 
-      // Get user information with USERNAME priority
+      // Get user information with FIXED USERNAME extraction
       let userInfo = null;
       let userIdentification = null;
       
@@ -395,29 +490,35 @@ class TimeDoctorAPI {
         const users = await this.getUsers({ limit: 1000 });
         userInfo = users.data?.find(u => u.id === userId) || null;
         
-        // Get the real username identification
+        // Get the real username identification using FIXED method
         userIdentification = await this.getUserIdentification(userId, userInfo);
         
       } catch (err) {
-        console.warn('Could not fetch user info:', err.message);
+        console.warn('[FIXED] Could not fetch user info:', err.message);
         // Try direct lookup
         try {
           userIdentification = await this.getUserOwnerInfo(userId);
         } catch (directErr) {
-          console.warn('Direct user lookup also failed:', directErr.message);
+          console.warn('[FIXED] Direct user lookup also failed:', directErr.message);
         }
       }
 
-      // Use USERNAME as the primary identifier
+      // Use FIXED USERNAME as the primary identifier
       const displayName = userIdentification?.username || 'Unknown User';
       const realEmail = userIdentification?.email || 'Unknown Email';
 
-      // Process and format the results with USERNAME priority
+      console.log(`👤 [FIXED] Final user identification for ${userId}:`);
+      console.log(`   Username: ${displayName}`);
+      console.log(`   Email: ${realEmail}`);
+      console.log(`   Method: ${userIdentification?.lookupMethod || 'none'}`);
+      console.log(`   Success: ${userIdentification?.success || false}`);
+
+      // Process and format the results with FIXED USERNAME
       const monitoringData = {
         userId: userId,
         companyId: companyId,
         
-        // 👤 PRIMARY: USERNAME identification
+        // 👤 PRIMARY: FIXED USERNAME identification
         username: userIdentification?.username || 'Unknown User',
         displayName: displayName,
         
@@ -443,6 +544,9 @@ class TimeDoctorAPI {
           lookupMethod: userIdentification?.lookupMethod || 'none',
           lookupSuccess: userIdentification?.success || false,
           confidence: userIdentification?.confidence || 'low',
+          
+          // Debug information
+          rawUserData: userIdentification?.rawData,
           
           // Legacy fields for backward compatibility
           name: displayName,
@@ -536,8 +640,8 @@ class TimeDoctorAPI {
         monitoringData.timeUsage.totalRecords > 0 ||
         monitoringData.disconnectionEvents.totalEvents > 0;
 
-      console.log(`✅ Complete monitoring data retrieved for user ${userId}`);
-      console.log(`   👤 USERNAME: ${displayName} (${userIdentification?.lookupMethod || 'none'})`);
+      console.log(`✅ [FIXED] Complete monitoring data retrieved for user ${userId}`);
+      console.log(`   👤 FINAL USERNAME: ${displayName} (${userIdentification?.lookupMethod || 'none'})`);
       console.log(`   📧 Email: ${realEmail}`);
       console.log(`   🖥️ Computer: ${userIdentification?.computerName || 'Unknown'}`);
       console.log(`   📊 Activity records: ${monitoringData.activitySummary.totalRecords}`);
@@ -547,18 +651,16 @@ class TimeDoctorAPI {
       return monitoringData;
 
     } catch (error) {
-      console.error(`❌ Error fetching monitoring data for user ${userId}:`, error.message);
+      console.error(`❌ [FIXED] Error fetching monitoring data for user ${userId}:`, error.message);
       throw new Error(`Failed to fetch monitoring data: ${error.message}`);
     }
   }
 
   /**
-   * MONITOR ALL USERS - Get monitoring data for all users with REAL USERNAMES
-   * @param {object} params - Parameters including from/to dates
-   * @returns {object} Monitoring data for all users with usernames
+   * MONITOR ALL USERS - Get monitoring data for all users with FIXED USERNAMES
    */
   async getAllUsersMonitoring(params = {}) {
-    console.log('👥🕵️ Fetching monitoring data for ALL users with REAL USERNAMES...');
+    console.log('👥🕵️ [FIXED] Fetching monitoring data for ALL users with REAL USERNAMES...');
     
     try {
       // First get all users
@@ -573,22 +675,22 @@ class TimeDoctorAPI {
         };
       }
 
-      console.log(`📊 Found ${userList.length} users to monitor with USERNAME identification`);
+      console.log(`📊 [FIXED] Found ${userList.length} users to monitor with FIXED USERNAME identification`);
       
       // Monitor each user (sequential to avoid overwhelming the API)
       const allMonitoringData = [];
       
       for (const user of userList) {
-        // Get username identification first
+        // Get username identification first using FIXED method
         let username = 'Unknown User';
         try {
           const userIdentification = await this.getUserIdentification(user.id, user);
           username = userIdentification.username;
           
-          console.log(`🔍 Monitoring user: "${username}" (ID: ${user.id})`);
+          console.log(`🔍 [FIXED] Monitoring user: "${username}" (ID: ${user.id})`);
         } catch (userError) {
-          username = user.name || user.username || `User ${user.id.substring(0, 8)}`;
-          console.log(`🔍 Monitoring user: "${username}" (Fallback) - ${user.id}`);
+          username = this.extractRealUsername(user) || `User ${user.id.substring(0, 8)}`;
+          console.log(`🔍 [FIXED] Monitoring user: "${username}" (Fallback) - ${user.id}`);
         }
         
         try {
@@ -599,7 +701,7 @@ class TimeDoctorAPI {
           await new Promise(resolve => setTimeout(resolve, 200));
           
         } catch (error) {
-          console.warn(`⚠️ Failed to monitor user ${user.id}: ${error.message}`);
+          console.warn(`⚠️ [FIXED] Failed to monitor user ${user.id}: ${error.message}`);
           allMonitoringData.push({
             userId: user.id,
             username: username,
@@ -627,10 +729,10 @@ class TimeDoctorAPI {
       const totalActivityRecords = allMonitoringData.reduce((sum, u) => sum + (u.activitySummary?.totalRecords || 0), 0);
       const usernamesFound = allMonitoringData.filter(u => u.username && u.username !== 'Unknown User' && !u.username.startsWith('User ')).length;
 
-      console.log(`✅ USERNAME monitoring complete for all users`);
+      console.log(`✅ [FIXED] USERNAME monitoring complete for all users`);
       console.log(`   👥 Total users monitored: ${allMonitoringData.length}`);
       console.log(`   📊 Users with data: ${totalWithData}`);
-      console.log(`   👤 USERNAMES identified: ${usernamesFound}`);
+      console.log(`   👤 REAL USERNAMES identified: ${usernamesFound}`);
       console.log(`   📸 Total screenshots: ${totalScreenshots}`);
       console.log(`   📈 Total activity records: ${totalActivityRecords}`);
 
@@ -649,7 +751,7 @@ class TimeDoctorAPI {
       };
 
     } catch (error) {
-      console.error('❌ Error monitoring all users:', error.message);
+      console.error('❌ [FIXED] Error monitoring all users:', error.message);
       throw new Error(`Failed to monitor all users: ${error.message}`);
     }
   }
