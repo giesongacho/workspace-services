@@ -1,6 +1,5 @@
 const express = require('express');
 const cors = require('cors');
-const cron = require('node-cron');
 const fetch = require('node-fetch');
 const TimeDoctorAPI = require('./api');
 const config = require('./config');
@@ -9,12 +8,12 @@ const config = require('./config');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// 🔗 UPDATED N8N WEBHOOK URL
+// 🔗 N8N WEBHOOK URL - SINGLE CALL FOR ALL USERS
 const N8N_WEBHOOK_URL = process.env.N8N_WEBHOOK_URL || 'https://n8n.srv470812.hstgr.cloud/webhook-test/workspace-url-n8n';
 
-// 🔧 FIXED: Send data only ONCE - disable recurring cron job
-const SEND_ONCE_ON_STARTUP = true; // Set to true to send once on startup
-const SEND_RECURRING = false; // Set to false to disable recurring sends
+// 🎯 SINGLE SEND CONFIGURATION
+const SEND_ONCE_ON_STARTUP = true; // Send all users in ONE call on startup
+const SEND_RECURRING = false; // No recurring sends
 
 // Middleware
 app.use(cors());
@@ -30,33 +29,21 @@ app.use((req, res, next) => {
   next();
 });
 
-// ==================== FIXED USERNAME IDENTIFICATION ====================
+// ==================== USER LOOKUP FUNCTION ====================
 
-/**
- * FIXED USER LOOKUP - This matches names from TimeDoctor Dashboard to userIds
- */
-async function getFixedUserLookup(userId) {
-  console.log(`🔍 [FIXED LOOKUP] Getting real username for userId: ${userId}`);
+async function getRealUsername(userId) {
+  console.log(`🔍 Getting real username for: ${userId}`);
   
   try {
-    // Strategy 1: Get all users first and match by ID
-    console.log('📊 [FIXED] Step 1: Getting all users from TimeDoctor...');
     const allUsers = await api.getUsers({ limit: 1000, detail: 'extended' });
     
     if (!allUsers.data || allUsers.data.length === 0) {
-      console.log('❌ [FIXED] No users found in TimeDoctor');
-      return { username: 'Unknown User', email: 'Email not available', method: 'no_users' };
+      return { name: 'Unknown User', email: 'Email not available', success: false };
     }
     
-    console.log(`📊 [FIXED] Found ${allUsers.data.length} users in TimeDoctor company`);
-    
-    // Find the user by exact ID match
     const matchedUser = allUsers.data.find(user => user.id === userId);
     
     if (matchedUser) {
-      console.log(`✅ [FIXED] Found user in list:`, JSON.stringify(matchedUser, null, 2));
-      
-      // Extract the real name - try multiple fields
       const realName = matchedUser.name || 
                       matchedUser.displayName || 
                       matchedUser.fullName || 
@@ -67,211 +54,46 @@ async function getFixedUserLookup(userId) {
       
       const realEmail = matchedUser.email || 'Email not available';
       
-      console.log(`✅ [FIXED] SUCCESS! Real name: "${realName}", Email: "${realEmail}"`);
+      console.log(`✅ Found real name: "${realName}" for user ${userId}`);
       
       return {
-        username: realName,
-        fullName: matchedUser.fullName || realName,
+        name: realName,
         email: realEmail,
         timezone: matchedUser.timezone,
         role: matchedUser.role,
-        method: 'direct_match',
-        confidence: 'high',
         success: true
       };
-      
     } else {
-      console.log(`❌ [FIXED] User ${userId} NOT FOUND in user list`);
-      console.log(`📊 Available user IDs: ${allUsers.data.map(u => u.id).join(', ')}`);
-      
-      return {
-        username: `User ${userId.substring(0, 8)}`,
+      console.log(`❌ User ${userId} not found in user list`);
+      return { 
+        name: `User ${userId.substring(0, 8)}`, 
         email: 'Email not available', 
-        method: 'not_found_fallback',
-        confidence: 'low',
-        success: false
+        success: false 
       };
     }
-    
   } catch (error) {
-    console.error(`❌ [FIXED] User lookup failed: ${error.message}`);
-    return {
-      username: `User ${userId.substring(0, 8)}`,
-      email: 'Email not available',
-      method: 'error_fallback',
-      error: error.message,
-      confidence: 'low',
-      success: false
+    console.error(`❌ Error looking up user ${userId}: ${error.message}`);
+    return { 
+      name: `User ${userId.substring(0, 8)}`, 
+      email: 'Email not available', 
+      success: false 
     };
   }
 }
 
-/**
- * 🔧 FIXED: Send ALL users data in ONE single webhook call (not individual calls)
- */
-async function sendAllUsersDataToN8N(allUsersData) {
-  try {
-    console.log(`\n🚀 [BATCH] Processing ALL ${allUsersData.length} users for SINGLE webhook call`);
-    
-    const processedUsers = [];
-    
-    // Process each user to get their real username
-    for (const userData of allUsersData) {
-      console.log(`🔍 [BATCH] Processing user: ${userData.userId}`);
-      
-      // Get the fixed username lookup for this user
-      const userLookup = await getFixedUserLookup(userData.userId);
-      
-      const processedUser = {
-        // 👤 REAL NAME (like "Levi Daniels" from TimeDoctor dashboard)
-        name: userLookup.username,
-        realEmail: userLookup.email,
-        deviceOwner: userLookup.username,
-        whoOwnsThisDevice: userLookup.username,
-        
-        user: {
-          userId: userData.userId,
-          
-          // 🎯 FIXED: Real names from TimeDoctor (like dashboard shows)
-          deviceOwner: userLookup.username,
-          whoOwnsThisDevice: userLookup.username,
-          realName: userLookup.username,
-          realUsername: userLookup.username,
-          realEmail: userLookup.email,
-          realTimezone: userLookup.timezone,
-          realRole: userLookup.role,
-          
-          // Original device name (for reference)
-          deviceName: userData.userInfo?.name || 'Unknown Device',
-          email: userData.userInfo?.email || 'Unknown',
-          
-          // 🔍 LOOKUP SUCCESS INFORMATION
-          lookupMethod: userLookup.method,
-          lookupError: userLookup.error || null,
-          lookupSuccess: userLookup.success,
-          confidence: userLookup.confidence,
-          
-          timezone: userData.userInfo?.timezone || 'Unknown',
-          lastSeen: userData.userInfo?.lastSeenGlobal,
-          deviceInfo: {
-            ...userData.userInfo?.deviceInfo || {},
-            deviceOwner: userLookup.username,
-            whoOwnsThisDevice: userLookup.username,
-            enrichedWithRealData: true,
-            enrichedAt: new Date().toISOString()
-          }
-        },
-        
-        monitoring: {
-          dateRange: userData.dateRange,
-          hasData: userData.summary?.hasData || false,
-          totalActivities: userData.activitySummary?.totalRecords || 0,
-          totalScreenshots: userData.screenshots?.totalScreenshots || 0,
-          totalDisconnections: userData.disconnectionEvents?.totalEvents || 0,
-          totalTimeUsageRecords: userData.timeUsage?.totalRecords || 0,
-          
-          // 👤 EMPLOYEE IDENTIFICATION (FIXED TO SHOW REAL NAMES)
-          employeeIdentification: {
-            identifiedName: userLookup.username,
-            identifiedEmail: userLookup.email,
-            deviceOwner: userLookup.username,
-            whoOwnsThisDevice: userLookup.username,
-            identificationMethod: userLookup.method,
-            confidenceLevel: userLookup.confidence,
-            monitoringReliable: userLookup.success
-          }
-        },
-        
-        activities: userData.activitySummary?.data || [],
-        screenshots: userData.screenshots?.data || [],
-        timeUsage: userData.timeUsage?.data || [],
-        disconnections: userData.disconnectionEvents?.data || [],
-        productivityStats: userData.productivityStats?.data || null,
-        overallStats: userData.overallStats?.data || null
-      };
-      
-      processedUsers.push(processedUser);
-      console.log(`✅ [BATCH] Processed: "${userLookup.username}" (${userLookup.method})`);
-      
-      // Small delay to avoid overwhelming the API
-      await new Promise(resolve => setTimeout(resolve, 200));
-    }
-
-    // 🎯 SINGLE WEBHOOK PAYLOAD with ALL users
-    const singleN8NPayload = {
-      // 📊 BATCH INFORMATION
-      batchInfo: {
-        totalUsers: processedUsers.length,
-        timestamp: new Date().toISOString(),
-        source: 'timekeeper-workspace-services',
-        type: 'batch_user_monitoring',
-        successfulLookups: processedUsers.filter(u => u.user.lookupSuccess).length,
-        failedLookups: processedUsers.filter(u => !u.user.lookupSuccess).length,
-        webhookUrl: N8N_WEBHOOK_URL
-      },
-      
-      // 👥 ALL USERS DATA IN ONE PAYLOAD
-      users: processedUsers,
-      
-      // 📈 SUMMARY STATISTICS
-      summary: {
-        totalUsers: processedUsers.length,
-        usersWithData: processedUsers.filter(u => u.monitoring.hasData).length,
-        totalActivities: processedUsers.reduce((sum, u) => sum + (u.monitoring.totalActivities || 0), 0),
-        totalScreenshots: processedUsers.reduce((sum, u) => sum + (u.monitoring.totalScreenshots || 0), 0),
-        totalDisconnections: processedUsers.reduce((sum, u) => sum + (u.monitoring.totalDisconnections || 0), 0),
-        realNamesIdentified: processedUsers.filter(u => u.user.lookupSuccess).map(u => u.name),
-        generatedAt: new Date().toISOString()
-      }
-    };
-
-    console.log(`\n📤 [BATCH] Sending ALL ${processedUsers.length} users to UPDATED webhook`);
-    console.log(`🔗 NEW Webhook URL: ${N8N_WEBHOOK_URL}`);
-    console.log(`✅ Real names identified: ${singleN8NPayload.summary.realNamesIdentified.join(', ')}`);
-    
-    const response = await fetch(N8N_WEBHOOK_URL, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'User-Agent': 'Workspace-Services-Monitor/1.0',
-        'Accept': 'application/json'
-      },
-      body: JSON.stringify(singleN8NPayload),
-      timeout: 30000 // Longer timeout for larger payload
-    });
-
-    console.log(`📡 Response: ${response.status} ${response.statusText}`);
-
-    if (response.ok) {
-      console.log(`✅ SUCCESS: Sent ALL ${processedUsers.length} users to NEW webhook!`);
-      console.log(`🎉 Your UPDATED n8n webhook received ONE batch with ALL users data!`);
-      return true;
-    } else {
-      const errorText = await response.text().catch(() => 'Unable to read response');
-      console.error(`❌ FAILED: ${response.status} ${response.statusText}`);
-      console.error(`❌ Error details: ${errorText}`);
-      console.error(`🔗 Failed webhook URL: ${N8N_WEBHOOK_URL}`);
-      return false;
-    }
-    
-  } catch (error) {
-    console.error(`❌ Error sending batch data to NEW webhook:`, error.message);
-    console.error(`🔗 Target webhook URL: ${N8N_WEBHOOK_URL}`);
-    return false;
-  }
-}
+// ==================== SINGLE WEBHOOK FUNCTION ====================
 
 /**
- * FIXED: Collect all user monitoring data and send as SINGLE BATCH to n8n
+ * 🎯 SEND ALL USERS IN ONE SINGLE JSON PAYLOAD TO WEBHOOK
+ * This sends ONE webhook call with ALL users wrapped inside
  */
-async function syncAllUsersToN8N() {
+async function sendAllUsersInSingleCall() {
   try {
-    console.log('\n🚀 [BATCH] Starting ONE-TIME BATCH sync with REAL USERNAMES...');
-    console.log(`🔗 UPDATED n8n Webhook: ${N8N_WEBHOOK_URL}`);
+    console.log('\n🚀 [SINGLE CALL] Starting to collect ALL users for ONE webhook call...');
     
-    // Get monitoring data for all users with FIXED username identification
+    // Get monitoring data for all users
     const allMonitoringData = await api.getAllUsersMonitoring({
-      from: new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString().split('T')[0], // Last 24 hours
+      from: new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString().split('T')[0],
       to: new Date().toISOString().split('T')[0]
     });
 
@@ -280,69 +102,181 @@ async function syncAllUsersToN8N() {
       return;
     }
 
-    console.log(`📊 [BATCH] Found ${allMonitoringData.data.length} users for BATCH processing`);
+    console.log(`📊 [SINGLE CALL] Processing ${allMonitoringData.data.length} users for ONE webhook...`);
     
-    // 🎯 Send ALL users in ONE webhook call to UPDATED URL
-    const success = await sendAllUsersDataToN8N(allMonitoringData.data);
+    // Process all users and collect their data
+    const allUsersData = [];
     
-    if (success) {
-      console.log(`\n✅ [BATCH] SUCCESS: ALL users sent to UPDATED webhook!`);
-      console.log(`🎉 Your UPDATED n8n received ONE webhook with ALL ${allMonitoringData.data.length} users!`);
+    for (const userData of allMonitoringData.data) {
+      console.log(`🔍 [SINGLE CALL] Processing user: ${userData.userId}`);
+      
+      // Get real username
+      const userLookup = await getRealUsername(userData.userId);
+      
+      // Prepare user data
+      const userInfo = {
+        // 👤 REAL USER IDENTIFICATION
+        name: userLookup.name,
+        email: userLookup.email,
+        userId: userData.userId,
+        realName: userLookup.name,
+        realEmail: userLookup.email,
+        timezone: userLookup.timezone || 'Unknown',
+        role: userLookup.role || 'Unknown',
+        lookupSuccess: userLookup.success,
+        
+        // 📊 MONITORING DATA
+        hasData: userData.summary?.hasData || false,
+        totalActivities: userData.activitySummary?.totalRecords || 0,
+        totalScreenshots: userData.screenshots?.totalScreenshots || 0,
+        totalDisconnections: userData.disconnectionEvents?.totalEvents || 0,
+        
+        // 📝 DETAILED DATA
+        activities: userData.activitySummary?.data || [],
+        screenshots: userData.screenshots?.data || [],
+        timeUsage: userData.timeUsage?.data || [],
+        disconnections: userData.disconnectionEvents?.data || [],
+        
+        // 📅 DATE RANGE
+        dateRange: userData.dateRange,
+        processedAt: new Date().toISOString()
+      };
+      
+      allUsersData.push(userInfo);
+      console.log(`✅ [SINGLE CALL] Added "${userLookup.name}" to batch`);
+      
+      // Small delay to avoid overwhelming API
+      await new Promise(resolve => setTimeout(resolve, 200));
+    }
+
+    // 🎯 CREATE SINGLE JSON PAYLOAD WITH ALL USERS
+    const singleJsonPayload = {
+      // 📊 BATCH METADATA
+      batchInfo: {
+        type: 'ALL_USERS_BATCH',
+        totalUsers: allUsersData.length,
+        timestamp: new Date().toISOString(),
+        source: 'timekeeper-workspace-services',
+        webhookUrl: N8N_WEBHOOK_URL,
+        description: 'All TimeDoctor users data in ONE single webhook call'
+      },
+      
+      // 👥 ALL USERS ARRAY - THIS IS WHAT YOU WANT!
+      allUsers: allUsersData,
+      
+      // 📈 SUMMARY STATISTICS
+      summary: {
+        totalUsers: allUsersData.length,
+        usersWithRealNames: allUsersData.filter(u => u.lookupSuccess).length,
+        usersWithData: allUsersData.filter(u => u.hasData).length,
+        totalActivities: allUsersData.reduce((sum, u) => sum + u.totalActivities, 0),
+        totalScreenshots: allUsersData.reduce((sum, u) => sum + u.totalScreenshots, 0),
+        realNamesFound: allUsersData.filter(u => u.lookupSuccess).map(u => u.name),
+        generatedAt: new Date().toISOString()
+      }
+    };
+
+    console.log('\n🎯 [SINGLE CALL] Sending ALL users in ONE JSON payload...');
+    console.log(`📊 Total users in payload: ${allUsersData.length}`);
+    console.log(`✅ Real names: ${singleJsonPayload.summary.realNamesFound.join(', ')}`);
+    console.log(`🔗 Target webhook: ${N8N_WEBHOOK_URL}`);
+    
+    // 🚀 SEND SINGLE WEBHOOK CALL WITH ALL USERS
+    const response = await fetch(N8N_WEBHOOK_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'User-Agent': 'Workspace-Services-Single-Call/1.0'
+      },
+      body: JSON.stringify(singleJsonPayload),
+      timeout: 30000
+    });
+
+    console.log(`📡 Webhook response: ${response.status} ${response.statusText}`);
+
+    if (response.ok) {
+      console.log('\n✅ [SINGLE CALL] SUCCESS!');
+      console.log(`🎉 Sent ALL ${allUsersData.length} users in ONE webhook call!`);
+      console.log(`🎯 Your n8n received ONE execution with ALL users wrapped inside!`);
+      console.log(`📋 No more individual calls - just ONE clean JSON payload!`);
+      return true;
     } else {
-      console.log(`\n❌ [BATCH] FAILED: Could not send batch data to UPDATED webhook`);
+      const errorText = await response.text().catch(() => 'Unable to read response');
+      console.error(`❌ [SINGLE CALL] FAILED: ${response.status} ${response.statusText}`);
+      console.error(`❌ Error: ${errorText}`);
+      return false;
     }
     
   } catch (error) {
-    console.error('❌ Error during batch sync:', error.message);
+    console.error(`❌ [SINGLE CALL] Error: ${error.message}`);
+    return false;
   }
 }
 
-// ==================== DEBUG ENDPOINTS ====================
+// ==================== API ENDPOINTS ====================
 
 /**
- * @route   GET /api/debug/fixedUserLookup/:userId
- * @desc    DEBUG the FIXED user lookup
+ * @route   GET /api/health
+ * @desc    Health check - shows single call configuration
  */
-app.get('/api/debug/fixedUserLookup/:userId', async (req, res) => {
+app.get('/api/health', (req, res) => {
+  res.json({
+    status: 'ok',
+    message: 'TimeDoctor API Server - SINGLE WEBHOOK CALL FOR ALL USERS',
+    timestamp: new Date().toISOString(),
+    configuration: {
+      webhookUrl: N8N_WEBHOOK_URL,
+      sendMode: 'SINGLE CALL - All users wrapped in ONE JSON payload',
+      sendOnce: SEND_ONCE_ON_STARTUP,
+      recurringCalls: SEND_RECURRING,
+      description: 'No more individual user calls - ALL users sent in ONE webhook'
+    },
+    webhookPayloadStructure: {
+      batchInfo: 'Metadata about the batch',
+      allUsers: 'Array containing ALL users data',
+      summary: 'Aggregate statistics'
+    }
+  });
+});
+
+/**
+ * @route   POST /api/sync/now
+ * @desc    Manually trigger single call with ALL users
+ */
+app.post('/api/sync/now', async (req, res) => {
   try {
-    const userId = req.params.userId;
-    console.log(`🔍 [DEBUG] Testing FIXED user lookup for: ${userId}`);
+    console.log('🚀 [MANUAL] Manual single call trigger...');
     
-    const result = await getFixedUserLookup(userId);
+    // Run single call in background
+    sendAllUsersInSingleCall().then(() => {
+      console.log('✅ [MANUAL] Background single call completed');
+    }).catch(error => {
+      console.error('❌ [MANUAL] Background single call failed:', error.message);
+    });
     
     res.json({
       success: true,
-      message: 'FIXED user lookup debug completed',
-      userId: userId,
-      result: result,
-      explanation: {
-        whatHappened: result.success 
-          ? `✅ Found real username: "${result.username}"` 
-          : `❌ User not found, using fallback: "${result.username}"`,
-        method: result.method,
-        confidence: result.confidence,
-        nextSteps: result.success 
-          ? 'User will show with real name in n8n webhooks'
-          : 'Check if userId exists in TimeDoctor or update user profile'
-      }
+      message: 'Single call with ALL users started',
+      description: 'ALL users will be sent in ONE webhook call (not individual calls)',
+      webhookUrl: N8N_WEBHOOK_URL,
+      note: 'Check your n8n - you will see ONE execution with ALL users inside'
     });
     
   } catch (error) {
     res.status(500).json({
       success: false,
-      error: error.message,
-      userId: req.params.userId
+      error: error.message
     });
   }
 });
 
 /**
  * @route   GET /api/debug/allUsers
- * @desc    See all users in TimeDoctor with their IDs and names
+ * @desc    See all users that will be sent in single call
  */
 app.get('/api/debug/allUsers', async (req, res) => {
   try {
-    console.log('📊 [DEBUG] Fetching all TimeDoctor users...');
+    console.log('📊 [DEBUG] Fetching all users...');
     
     const allUsers = await api.getUsers({ limit: 1000, detail: 'extended' });
     
@@ -357,40 +291,24 @@ app.get('/api/debug/allUsers', async (req, res) => {
     const userList = allUsers.data.map(user => ({
       userId: user.id,
       name: user.name || 'NO NAME',
-      displayName: user.displayName || 'NO DISPLAY NAME', 
-      username: user.username || 'NO USERNAME',
-      fullName: user.fullName || 'NO FULL NAME',
       email: user.email || 'NO EMAIL',
-      role: user.role || 'NO ROLE',
-      status: user.status || 'NO STATUS',
-      
-      // Show what name will be used in webhook
       finalName: user.name || 
                user.displayName || 
                user.fullName || 
                user.username ||
-               `${user.firstName || ''} ${user.lastName || ''}`.trim() ||
                user.email?.split('@')[0] ||
                'Unknown User'
     }));
     
-    console.log(`✅ [DEBUG] Found ${userList.length} users in TimeDoctor`);
-    
     res.json({
       success: true,
-      message: `Found ${userList.length} users in TimeDoctor company`,
+      message: `Found ${userList.length} users that will be sent in SINGLE webhook call`,
       totalUsers: userList.length,
       data: userList,
       webhookInfo: {
-        currentWebhookUrl: N8N_WEBHOOK_URL,
-        webhookType: 'UPDATED webhook-test endpoint',
-        batchProcessing: true
-      },
-      explanation: {
-        purpose: 'This shows all users in your TimeDoctor company',
-        usage: 'Use the "userId" field to test specific user lookup with /api/debug/fixedUserLookup/{userId}',
-        finalName: 'The "finalName" field shows what name will appear in n8n webhooks',
-        batchInfo: 'ALL these users will be sent to the UPDATED webhook in ONE single call'
+        url: N8N_WEBHOOK_URL,
+        method: 'SINGLE CALL - All users in ONE JSON payload',
+        description: 'These users will be wrapped in ONE webhook call'
       }
     });
     
@@ -402,93 +320,15 @@ app.get('/api/debug/allUsers', async (req, res) => {
   }
 });
 
-// ==================== MANUAL SYNC ENDPOINTS ====================
-
-/**
- * @route   POST /api/sync/now
- * @desc    Manually trigger BATCH sync to UPDATED n8n webhook (for testing)
- */
-app.post('/api/sync/now', async (req, res) => {
-  try {
-    console.log('🚀 [MANUAL] Manual BATCH sync triggered to UPDATED webhook...');
-    
-    // Run sync in background
-    syncAllUsersToN8N().then(() => {
-      console.log('✅ [MANUAL] Background BATCH sync completed to UPDATED webhook');
-    }).catch(error => {
-      console.error('❌ [MANUAL] Background BATCH sync failed:', error.message);
-    });
-    
-    res.json({
-      success: true,
-      message: 'Manual BATCH sync started in background',
-      status: 'BATCH sync is running - ALL users will be sent in ONE webhook call',
-      webhookInfo: {
-        targetUrl: N8N_WEBHOOK_URL,
-        webhookType: 'UPDATED webhook-test endpoint',
-        batchProcessing: true
-      },
-      note: 'Check console for progress and your UPDATED n8n webhook for ONE batch with ALL users'
-    });
-    
-  } catch (error) {
-    res.status(500).json({
-      success: false,
-      error: error.message
-    });
-  }
-});
-
-// ==================== HEALTH ENDPOINT ====================
-
-/**
- * @route   GET /api/health
- * @desc    Health check with UPDATED webhook status
- */
-app.get('/api/health', (req, res) => {
-  res.json({
-    status: 'ok',
-    message: 'TimeDoctor API Server with BATCH Processing & UPDATED Webhook',
-    timestamp: new Date().toISOString(),
-    fixes: {
-      usernameLookup: 'FIXED - Now gets real names like "Levi Daniels", "Joshua Banks"',
-      webhookFrequency: 'FIXED - Sends data only ONCE (not every 2 minutes)',
-      webhookFormat: 'FIXED - Sends ALL users in ONE webhook call (not individual calls)',
-      webhookUrl: 'UPDATED - Now using webhook-test endpoint',
-      features: [
-        'Real TimeDoctor usernames in webhooks',
-        'Single webhook call with ALL users',
-        'Single send on startup (not recurring)',
-        'UPDATED webhook URL (webhook-test)',
-        'Proper user ID matching', 
-        'Enhanced debugging endpoints'
-      ]
-    },
-    testEndpoints: [
-      'GET /api/debug/fixedUserLookup/aLfYIu7-TthUmwrm',
-      'GET /api/debug/allUsers',
-      'POST /api/sync/now'
-    ],
-    webhookConfig: {
-      url: N8N_WEBHOOK_URL,
-      urlType: 'UPDATED webhook-test endpoint',
-      sendOnce: SEND_ONCE_ON_STARTUP,
-      sendRecurring: SEND_RECURRING,
-      format: 'BATCH - All users in ONE webhook call'
-    }
-  });
-});
-
 // 404 handler
 app.use((req, res) => {
   res.status(404).json({
     success: false,
     error: 'Endpoint not found',
     availableEndpoints: [
-      'GET /api/health - Server health with UPDATED webhook status',
-      'GET /api/debug/fixedUserLookup/:userId - Test FIXED user lookup',
-      'GET /api/debug/allUsers - See all TimeDoctor users with their IDs',
-      'POST /api/sync/now - Manually trigger BATCH sync to UPDATED webhook'
+      'GET /api/health - Server health and single call configuration',
+      'GET /api/debug/allUsers - See all users that will be sent',
+      'POST /api/sync/now - Manually send ALL users in single call'
     ]
   });
 });
@@ -506,47 +346,46 @@ app.use((err, req, res, next) => {
 // ==================== START SERVER ====================
 
 app.listen(PORT, () => {
-  console.log('\n🚀 TimeDoctor API Server with BATCH PROCESSING & UPDATED WEBHOOK');
-  console.log('==================================================================');
+  console.log('\n🚀 TimeDoctor API Server - SINGLE WEBHOOK CALL FOR ALL USERS');
+  console.log('===============================================================');
   console.log(`📡 Server: http://localhost:${PORT}`);
   console.log(`📧 Email: ${config.credentials.email}`);
   console.log(`🏢 Company: ${config.credentials.companyName}`);
-  console.log('\n✅ FIXES APPLIED:');
-  console.log('=================');
-  console.log('🎯 1. FIXED Username Lookup - Gets real names like "Levi Daniels"');
-  console.log('🎯 2. FIXED Webhook Frequency - Sends ONCE only (not every 2 minutes)');
-  console.log('🎯 3. FIXED Webhook Format - ALL users in ONE webhook call');
-  console.log('🎯 4. UPDATED Webhook URL - Now using webhook-test endpoint');
-  console.log('\n🔗 WEBHOOK CONFIGURATION:');
-  console.log('=========================');
-  console.log(`✅ OLD URL: https://n8n.srv470812.hstgr.cloud/webhook/workspace-url-n8n`);
-  console.log(`🎯 NEW URL: ${N8N_WEBHOOK_URL}`);
-  console.log(`✅ Format: BATCH - All users in ONE webhook call`);
-  console.log('\n🔍 TEST THE UPDATED WEBHOOK:');
-  console.log('============================');
-  console.log('1. Check all users: GET  /api/debug/allUsers');  
-  console.log('2. Test user lookup: GET  /api/debug/fixedUserLookup/aLfYIu7-TthUmwrm');
-  console.log('3. Manual batch sync to NEW webhook: POST /api/sync/now');
-  console.log('\n🎉 UPDATED CONFIGURATION:');
-  console.log('=========================');
-  console.log(`✅ Send Once: ${SEND_ONCE_ON_STARTUP}`);
-  console.log(`✅ Recurring: ${SEND_RECURRING}`);
-  console.log(`✅ Batch Processing: Enabled`);
-  console.log(`✅ Target: webhook-test endpoint`);
+  console.log('\n🎯 SINGLE CALL CONFIGURATION:');
+  console.log('=============================');
+  console.log('✅ ALL users wrapped in ONE JSON payload');
+  console.log('✅ ONE webhook call (not individual calls)'); 
+  console.log('✅ Real usernames like "Levi Daniels", "Joshua Banks"');
+  console.log('✅ Sent ONCE on startup (not recurring)');
+  console.log('\n🔗 WEBHOOK TARGET:');
+  console.log('==================');
+  console.log(`🎯 URL: ${N8N_WEBHOOK_URL}`);
+  console.log('📊 Payload: ONE JSON with ALL users inside');
+  console.log('🎉 Result: Clean n8n execution (no spam!)');
+  console.log('\n🔍 TEST COMMANDS:');
+  console.log('================');
+  console.log('1. Check config: GET  /api/health');  
+  console.log('2. See all users: GET /api/debug/allUsers');
+  console.log('3. Manual single call: POST /api/sync/now');
+  console.log('\n✅ SINGLE CALL BENEFITS:');
+  console.log('========================');
+  console.log('✅ No more ugly individual webhook calls');
+  console.log('✅ One clean JSON payload with ALL users');
+  console.log('✅ Easy to process in n8n');
+  console.log('✅ Real usernames instead of "Unknown User"');
   
-  // 🚀 FIXED: Send data ONCE on startup to UPDATED webhook (if enabled)
+  // 🚀 Send all users in single call on startup
   if (SEND_ONCE_ON_STARTUP) {
     setTimeout(() => {
-      console.log('\n🚀 [STARTUP] Running SINGLE BATCH sync to UPDATED webhook...');
-      console.log(`🎯 ALL users will be sent to: ${N8N_WEBHOOK_URL}`);
-      console.log('🔄 Webhook format: ONE batch call (not individual calls)');
-      syncAllUsersToN8N();
-    }, 10000); // Wait 10 seconds for server to fully start
+      console.log('\n🚀 [STARTUP] Sending ALL users in ONE webhook call...');
+      console.log('🎯 This will be ONE clean execution in your n8n!');
+      sendAllUsersInSingleCall();
+    }, 10000);
   } else {
-    console.log('\n⏸️ One-time sync disabled. Use POST /api/sync/now to manually trigger');
+    console.log('\n⏸️ Startup call disabled. Use POST /api/sync/now to trigger manually');
   }
   
-  console.log('\n🎯 Server ready! ALL users will be sent to UPDATED webhook with real names!');
+  console.log('\n🎉 Server ready! ALL users will be sent in ONE beautiful JSON payload!');
 });
 
 module.exports = app;
