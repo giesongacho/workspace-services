@@ -8,8 +8,8 @@ const config = require('./config');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// 🔗 N8N WEBHOOK URL - SINGLE CALL FOR ALL USERS
-const N8N_WEBHOOK_URL = process.env.N8N_WEBHOOK_URL || 'https://n8n.srv470812.hstgr.cloud/webhook-test/workspace-url-n8n';
+// 🔗 FIXED WEBHOOK URL - Use the original working webhook
+const N8N_WEBHOOK_URL = process.env.N8N_WEBHOOK_URL || 'https://n8n.srv470812.hstgr.cloud/webhook/workspace-url-n8n';
 
 // 🎯 SINGLE SEND CONFIGURATION
 const SEND_ONCE_ON_STARTUP = true; // Send all users in ONE call on startup
@@ -179,7 +179,7 @@ async function sendAllUsersInSingleCall() {
     console.log('\n🎯 [SINGLE CALL] Sending ALL users in ONE JSON payload...');
     console.log(`📊 Total users in payload: ${allUsersData.length}`);
     console.log(`✅ Real names: ${singleJsonPayload.summary.realNamesFound.join(', ')}`);
-    console.log(`🔗 Target webhook: ${N8N_WEBHOOK_URL}`);
+    console.log(`🔗 FIXED Webhook URL: ${N8N_WEBHOOK_URL}`);
     
     // 🚀 SEND SINGLE WEBHOOK CALL WITH ALL USERS
     const response = await fetch(N8N_WEBHOOK_URL, {
@@ -355,11 +355,11 @@ app.listen(PORT, () => {
   console.log('=============================');
   console.log('✅ ALL users wrapped in ONE JSON payload');
   console.log('✅ ONE webhook call (not individual calls)'); 
-  console.log('✅ Real usernames like "Levi Daniels", "Joshua Banks"');
+  console.log('✅ Real usernames like "Richard Edwards", "Theo Bagwell"');
   console.log('✅ Sent ONCE on startup (not recurring)');
   console.log('\n🔗 WEBHOOK TARGET:');
   console.log('==================');
-  console.log(`🎯 URL: ${N8N_WEBHOOK_URL}`);
+  console.log(`🎯 FIXED URL: ${N8N_WEBHOOK_URL}`);
   console.log('📊 Payload: ONE JSON with ALL users inside');
   console.log('🎉 Result: Clean n8n execution (no spam!)');
   console.log('\n🔍 TEST COMMANDS:');
@@ -371,14 +371,15 @@ app.listen(PORT, () => {
   console.log('========================');
   console.log('✅ No more ugly individual webhook calls');
   console.log('✅ One clean JSON payload with ALL users');
-  console.log('✅ Easy to process in n8n');
-  console.log('✅ Real usernames instead of "Unknown User"');
+  console.log('✅ Easy to process in n8n with $json.allUsers');
+  console.log('✅ Real usernames: Richard Edwards, Theo Bagwell, etc.');
   
   // 🚀 Send all users in single call on startup
   if (SEND_ONCE_ON_STARTUP) {
     setTimeout(() => {
       console.log('\n🚀 [STARTUP] Sending ALL users in ONE webhook call...');
       console.log('🎯 This will be ONE clean execution in your n8n!');
+      console.log('📋 All 11 users wrapped in single JSON payload!');
       sendAllUsersInSingleCall();
     }, 10000);
   } else {
