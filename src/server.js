@@ -262,6 +262,158 @@ app.get('/api/getAllUserNames', async (req, res) => {
   }
 });
 
+// ==================== ENHANCED N8N WEBHOOK ENDPOINT WITH FULL ACTIVITY DATA ====================
+
+/**
+ * @route   GET /api/monitorAllUsers
+ * @desc    Get complete monitoring data for ALL users with full activity details for N8N webhook
+ */
+app.get('/api/monitorAllUsers', async (req, res) => {
+  try {
+    console.log('🕵️ MONITOR ALL USERS: Getting complete activity data for N8N webhook...');
+    
+    // Get date range parameters (default to last 24 hours)
+    const from = req.query.from || new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+    const to = req.query.to || new Date().toISOString().split('T')[0];
+    
+    console.log(`📅 Date range: ${from} to ${to}`);
+    
+    // Get monitoring data for all users WITH FULL ACTIVITY DETAILS
+    const allMonitoringData = await api.getAllUsersMonitoring({
+      from: from,
+      to: to
+    });
+
+    if (!allMonitoringData.success || !allMonitoringData.data) {
+      return res.json({
+        success: false,
+        message: 'No monitoring data available',
+        data: []
+      });
+    }
+
+    console.log(`📊 Found ${allMonitoringData.data.length} users with activity data`);
+    
+    // Send ALL users data in ONE webhook call (batch style)
+    const batchInfo = {
+      type: "ALL_USERS_IN_ONE_CALL",
+      totalUsers: allMonitoringData.data.length,
+      timestamp: new Date().toISOString(),
+      source: "timekeeper-workspace-services",
+      webhookUrl: N8N_WEBHOOK_URL,
+      description: "ALL users in ONE single webhook call - NO individual calls!"
+    };
+
+    // Prepare all users with COMPLETE activity data
+    const allUsers = allMonitoringData.data.map(userData => ({
+      // 👤 USER IDENTIFICATION
+      name: userData.userInfo?.name || userData.username || 'Unknown',
+      email: userData.userInfo?.email || 'Unknown',
+      userId: userData.userId,
+      realName: userData.userInfo?.username || userData.username || 'Unknown',
+      realEmail: userData.userInfo?.email || 'Unknown',
+      timezone: userData.userInfo?.timezone || 'Unknown',
+      role: userData.userInfo?.role || 'user',
+      status: userData.userInfo?.status || 'offline',
+      processedAt: new Date().toISOString(),
+      
+      // 📊 SUMMARY COUNTS
+      lookupSuccess: userData.userInfo?.lookupSuccess || false,
+      hasData: userData.summary?.hasData || false,
+      totalActivities: userData.activitySummary?.totalRecords || 0,
+      totalScreenshots: userData.screenshots?.totalScreenshots || 0,
+      totalDisconnections: userData.disconnectionEvents?.totalEvents || 0,
+      totalTimeUsage: userData.timeUsage?.totalRecords || 0,
+      
+      // 🎯 COMPLETE ACTIVITY DATA ARRAYS (This is what was missing!)
+      activities: userData.activitySummary?.data || [],
+      screenshots: userData.screenshots?.data || [],
+      timeUsage: userData.timeUsage?.data || [],
+      disconnections: userData.disconnectionEvents?.data || [],
+      
+      // 📈 PRODUCTIVITY & STATS DATA  
+      productivityStats: userData.productivityStats?.data || null,
+      overallStats: userData.overallStats?.data || null,
+      
+      // 📅 DATE RANGE
+      dateRange: {
+        from: from,
+        to: to
+      },
+      
+      // 🔍 DEBUG INFO
+      userInfo: userData.userInfo || {},
+      monitoringStatus: {
+        activityStatus: userData.activitySummary?.status || 'no_data',
+        screenshotStatus: userData.screenshots?.status || 'no_data',
+        timeUsageStatus: userData.timeUsage?.status || 'no_data',
+        disconnectionStatus: userData.disconnectionEvents?.status || 'no_data'
+      }
+    }));
+
+    const webhookPayload = {
+      body: {
+        batchInfo: batchInfo,
+        allUsers: allUsers
+      }
+    };
+
+    // Send to N8N webhook immediately
+    if (N8N_WEBHOOK_URL && N8N_WEBHOOK_URL !== 'https://n8n.srv470812.hstgr.cloud/webhook/workspace-url-n8n') {
+      try {
+        console.log(`📤 Sending ALL users activity data to N8N webhook...`);
+        console.log(`🔗 Webhook URL: ${N8N_WEBHOOK_URL}`);
+        
+        const webhookResponse = await fetch(N8N_WEBHOOK_URL, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'User-Agent': 'Workspace-Services-Monitor/1.0'
+          },
+          body: JSON.stringify(webhookPayload),
+          timeout: 30000 // 30 second timeout for large payloads
+        });
+
+        if (webhookResponse.ok) {
+          console.log(`✅ Successfully sent ALL users activity data to N8N!`);
+          console.log(`📊 Payload included: ${allUsers.length} users with complete activity arrays`);
+        } else {
+          console.error(`❌ Failed to send to N8N: ${webhookResponse.status} ${webhookResponse.statusText}`);
+        }
+        
+      } catch (webhookError) {
+        console.error(`❌ Error sending to N8N webhook: ${webhookError.message}`);
+      }
+    }
+
+    // Also return the data as API response
+    res.json({
+      success: true,
+      message: `Complete monitoring data retrieved for ${allUsers.length} users`,
+      summary: {
+        totalUsers: allUsers.length,
+        usersWithData: allUsers.filter(u => u.hasData).length,
+        totalActivities: allUsers.reduce((sum, u) => sum + u.totalActivities, 0),
+        totalScreenshots: allUsers.reduce((sum, u) => sum + u.totalScreenshots, 0),
+        totalDisconnections: allUsers.reduce((sum, u) => sum + u.totalDisconnections, 0),
+        totalTimeUsage: allUsers.reduce((sum, u) => sum + u.totalTimeUsage, 0),
+        dateRange: { from, to },
+        webhookSent: !!N8N_WEBHOOK_URL,
+        webhookUrl: N8N_WEBHOOK_URL
+      },
+      data: webhookPayload
+    });
+    
+  } catch (error) {
+    console.error('❌ Error monitoring all users:', error.message);
+    res.status(500).json({
+      success: false,
+      error: error.message,
+      message: 'Failed to get monitoring data for all users'
+    });
+  }
+});
+
 // ==================== N8N USER LOOKUP HELPERS ====================
 
 /**
@@ -538,10 +690,10 @@ app.get('/api/debug/allUsersWithDetails', async (req, res) => {
   }
 });
 
-// ==================== N8N WEBHOOK FUNCTIONS ====================
+// ==================== ENHANCED N8N WEBHOOK FUNCTIONS ====================
 
 /**
- * Send individual user data to n8n webhook WITH USERNAME PRIORITY
+ * Send individual user data to n8n webhook WITH COMPLETE ACTIVITY DATA
  * @param {object} userData - Individual user monitoring data
  * @returns {Promise<boolean>} Success status
  */
@@ -599,80 +751,58 @@ async function sendUserDataToN8N(userData) {
     const n8nPayload = {
       // 👤 PRIMARY: WHO OWNS THIS LAPTOP/COMPUTER (REAL USERNAME FROM TIMEKEEPER)
       name: realUserName,
+      email: userData.userInfo?.email || 'Unknown',
+      userId: userData.userId,
+      realName: realUserName,
       realEmail: realUserEmail,
+      timezone: userData.userInfo?.timezone || realUserTimezone,
+      role: userData.userInfo?.role || realUserRole,
+      status: userData.userInfo?.status || 'offline',
+      processedAt: new Date().toISOString(),
+      
+      // 📊 SUMMARY COUNTS
+      lookupSuccess: lookupMethod !== 'none' && !lookupError,
+      hasData: userData.summary?.hasData || false,
+      totalActivities: userData.activitySummary?.totalRecords || 0,
+      totalScreenshots: userData.screenshots?.totalScreenshots || 0,
+      totalDisconnections: userData.disconnectionEvents?.totalEvents || 0,
+      
+      // 🚀 COMPLETE ACTIVITY DATA ARRAYS (FIXED: Now includes full arrays!)
+      activities: userData.activitySummary?.data || [],
+      screenshots: userData.screenshots?.data || [],
+      timeUsage: userData.timeUsage?.data || [],
+      disconnections: userData.disconnectionEvents?.data || [],
+      
+      // 📈 PRODUCTIVITY & STATS DATA  
+      productivityStats: userData.productivityStats?.data || null,
+      overallStats: userData.overallStats?.data || null,
+      
+      // Device ownership information
       deviceOwner: deviceOwner,
       whoOwnsThisDevice: deviceOwner,
       laptopOwner: deviceOwner,
       computerOwner: deviceOwner,
       
+      // Enhanced metadata
       timestamp: new Date().toISOString(),
       source: 'timekeeper-workspace-services',
       type: 'user_monitoring',
-      user: {
-        userId: userData.userId,
-        
-        // 👤 DEVICE OWNERSHIP INFORMATION (PRIMARY FOCUS)
-        deviceOwner: deviceOwner,
-        whoOwnsThisDevice: deviceOwner,
-        realUsername: realUserName,
-        
-        // Original device name (secondary)
-        deviceName: userData.userInfo?.name || 'Unknown Device',
-        email: userData.userInfo?.email || 'Unknown',
-        
-        // 🎯 ENHANCED USER DATA WITH USERNAME PRIORITY
-        realName: realUserName,
-        realEmail: realUserEmail,
-        realTimezone: realUserTimezone,
-        realRole: realUserRole,
-        
-        // 🔍 LOOKUP INFORMATION
-        lookupMethod: lookupMethod,
-        lookupError: lookupError,
-        lookupSuccess: lookupMethod !== 'none' && !lookupError,
-        confidence: confidence,
-        
-        timezone: userData.userInfo?.timezone || 'Unknown',
-        lastSeen: userData.userInfo?.lastSeenGlobal,
-        deviceInfo: {
-          ...userData.userInfo?.deviceInfo || {},
-          
-          // PRIMARY: Device ownership
-          deviceOwner: deviceOwner,
-          whoOwnsThisDevice: deviceOwner,
-          
-          enrichedWithRealData: true,
-          enrichedAt: new Date().toISOString()
-        }
-      },
-      monitoring: {
-        dateRange: userData.dateRange,
-        hasData: userData.summary?.hasData || false,
-        totalActivities: userData.activitySummary?.totalRecords || 0,
-        totalScreenshots: userData.screenshots?.totalScreenshots || 0,
-        totalDisconnections: userData.disconnectionEvents?.totalEvents || 0,
-        totalTimeUsageRecords: userData.timeUsage?.totalRecords || 0,
-        
-        // 👤 EMPLOYEE IDENTIFICATION FOR MONITORING (USERNAME PRIORITY)
-        employeeIdentification: {
-          identifiedName: realUserName,
-          identifiedEmail: realUserEmail,
-          deviceOwner: deviceOwner,
-          whoOwnsThisDevice: deviceOwner,
-          identificationMethod: lookupMethod,
-          confidenceLevel: confidence,
-          monitoringReliable: confidence !== 'very_low'
-        }
-      },
-      activities: userData.activitySummary?.data || [],
-      screenshots: userData.screenshots?.data || [],
-      timeUsage: userData.timeUsage?.data || [],
-      disconnections: userData.disconnectionEvents?.data || [],
-      productivityStats: userData.productivityStats?.data || null,
-      overallStats: userData.overallStats?.data || null
+      lookupMethod: lookupMethod,
+      lookupError: lookupError,
+      confidence: confidence,
+      
+      // Debug info
+      userInfo: userData.userInfo || {},
+      monitoringStatus: {
+        activityStatus: userData.activitySummary?.status || 'no_data',
+        screenshotStatus: userData.screenshots?.status || 'no_data',
+        timeUsageStatus: userData.timeUsage?.status || 'no_data',
+        disconnectionStatus: userData.disconnectionEvents?.status || 'no_data'
+      }
     };
 
-    console.log(`📤 Sending monitoring data for device owner: "${deviceOwner}" (Method: ${lookupMethod})`);
+    console.log(`📤 Sending COMPLETE monitoring data for device owner: "${deviceOwner}" (Method: ${lookupMethod})`);
+    console.log(`📊 Data includes: ${n8nPayload.activities.length} activities, ${n8nPayload.screenshots.length} screenshots, ${n8nPayload.timeUsage.length} time usage records, ${n8nPayload.disconnections.length} disconnections`);
     console.log(`🔗 Using webhook URL: ${N8N_WEBHOOK_URL}`);
     
     const response = await fetch(N8N_WEBHOOK_URL, {
@@ -689,7 +819,7 @@ async function sendUserDataToN8N(userData) {
     console.log(`📡 Response status: ${response.status} ${response.statusText}`);
 
     if (response.ok) {
-      console.log(`✅ Successfully sent data to n8n for device owner: "${deviceOwner}" (${userId})`);
+      console.log(`✅ Successfully sent COMPLETE data to n8n for device owner: "${deviceOwner}" (${userId})`);
       return true;
     } else {
       const errorText = await response.text().catch(() => 'Unable to read response');
@@ -703,14 +833,14 @@ async function sendUserDataToN8N(userData) {
 }
 
 /**
- * Collect all user monitoring data and send to n8n (each user separately) WITH USERNAME PRIORITY
+ * Collect all user monitoring data and send to n8n (each user separately) WITH COMPLETE ACTIVITY DATA
  */
 async function syncAllUsersToN8N() {
   try {
-    console.log('\n🔄 Starting automated n8n sync with USERNAME priority...');
+    console.log('\n🔄 Starting automated n8n sync with COMPLETE ACTIVITY DATA...');
     console.log(`🔗 n8n Webhook URL: ${N8N_WEBHOOK_URL}`);
     
-    // Get monitoring data for all users WITH USERNAME IDENTIFICATION
+    // Get monitoring data for all users WITH USERNAME IDENTIFICATION AND FULL ACTIVITY DATA
     const allMonitoringData = await api.getAllUsersMonitoring({
       from: new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString().split('T')[0], // Last 24 hours
       to: new Date().toISOString().split('T')[0]
@@ -721,13 +851,17 @@ async function syncAllUsersToN8N() {
       return;
     }
 
-    console.log(`📊 Found ${allMonitoringData.data.length} device owners to sync to n8n`);
+    console.log(`📊 Found ${allMonitoringData.data.length} device owners with COMPLETE ACTIVITY DATA to sync to n8n`);
     console.log(`👤 USERNAMES identified: ${allMonitoringData.summary.usernamesIdentified || 0}`);
+    console.log(`📈 Total activities: ${allMonitoringData.data.reduce((sum, u) => sum + (u.activitySummary?.totalRecords || 0), 0)}`);
+    console.log(`📸 Total screenshots: ${allMonitoringData.data.reduce((sum, u) => sum + (u.screenshots?.totalScreenshots || 0), 0)}`);
+    console.log(`📊 Total time usage: ${allMonitoringData.data.reduce((sum, u) => sum + (u.timeUsage?.totalRecords || 0), 0)}`);
+    console.log(`🔌 Total disconnections: ${allMonitoringData.data.reduce((sum, u) => sum + (u.disconnectionEvents?.totalEvents || 0), 0)}`);
     
     let successCount = 0;
     let errorCount = 0;
 
-    // Send each user's data separately to n8n with USERNAME priority
+    // Send each user's COMPLETE data separately to n8n
     for (const userData of allMonitoringData.data) {
       // Add a small delay between requests to avoid overwhelming n8n
       await new Promise(resolve => setTimeout(resolve, 500));
@@ -740,7 +874,7 @@ async function syncAllUsersToN8N() {
       }
     }
 
-    console.log(`✅ n8n sync completed: ${successCount} device owners successful, ${errorCount} errors`);
+    console.log(`✅ n8n sync with COMPLETE ACTIVITY DATA completed: ${successCount} device owners successful, ${errorCount} errors`);
     
   } catch (error) {
     console.error('❌ Error during n8n sync:', error.message);
@@ -750,9 +884,9 @@ async function syncAllUsersToN8N() {
 // ==================== N8N SCHEDULER ====================
 
 // Schedule automatic sync every 2 minutes
-console.log('⏰ Setting up n8n sync scheduler (every 2 minutes)...');
+console.log('⏰ Setting up n8n sync scheduler with COMPLETE ACTIVITY DATA (every 2 minutes)...');
 cron.schedule(MONITORING_INTERVAL, () => {
-  console.log('\n⏰ Scheduled n8n sync triggered');
+  console.log('\n⏰ Scheduled n8n sync triggered with COMPLETE ACTIVITY DATA');
   syncAllUsersToN8N();
 }, {
   scheduled: true,
@@ -761,7 +895,7 @@ cron.schedule(MONITORING_INTERVAL, () => {
 
 // Initial sync after 30 seconds of server start
 setTimeout(() => {
-  console.log('🚀 Running initial n8n sync...');
+  console.log('🚀 Running initial n8n sync with COMPLETE ACTIVITY DATA...');
   syncAllUsersToN8N();
 }, 30000);
 
@@ -774,14 +908,21 @@ setTimeout(() => {
 app.get('/api/health', (req, res) => {
   res.json({
     status: 'ok',
-    message: 'TimeDoctor API Server with USERNAME Priority Detection is running',
+    message: 'TimeDoctor API Server with COMPLETE ACTIVITY DATA is running',
     timestamp: new Date().toISOString(),
     enhancedFeatures: {
+      completeActivityData: true,
       usernamePriorityDetection: true,
       examples: [
         '"Dev Team" → Real TimeDoctor username found!',
         '"John Smith" → Actual employee name',
         '"Alice Johnson" → Real user identification'
+      ],
+      activityDataIncludes: [
+        'activities[] - Full activity records with start times, duration, mode',
+        'screenshots[] - Complete screenshot data with scores, categories',
+        'timeUsage[] - Time usage patterns and records',
+        'disconnections[] - All disconnection events'
       ],
       lookupStrategies: [
         '1. Direct TimeDoctor user lookup',
@@ -790,9 +931,10 @@ app.get('/api/health', (req, res) => {
       ],
       newEndpoints: [
         'GET /api/getUserName/:userId',
-        'GET /api/getAllUserNames'
+        'GET /api/getAllUserNames',
+        'GET /api/monitorAllUsers (NEW: Complete activity data for N8N)'
       ],
-      focusOn: 'WHO OWNS THE LAPTOP/COMPUTER (not device names)'
+      focusOn: 'COMPLETE ACTIVITY DATA + WHO OWNS THE LAPTOP/COMPUTER'
     }
   });
 });
@@ -853,11 +995,12 @@ app.use((req, res) => {
     success: false,
     error: 'Endpoint not found',
     availableEndpoints: [
-      'GET /api/health - Server health with USERNAME priority',
+      'GET /api/health - Server health with COMPLETE ACTIVITY DATA',
       'GET /api/auth/status - Authentication status', 
       'GET /api/getUsers - All TimeDoctor users',
       'GET /api/getUserName/:userId - Get USERNAME (device owner)',
       'GET /api/getAllUserNames - Get USERNAMES for ALL users (device owners)',
+      'GET /api/monitorAllUsers - NEW: Complete activity data for N8N webhook',
       'GET /api/n8n/lookupUser/:userId - Single user lookup with USERNAME',
       'GET /api/debug/userLookup/:userId - Debug user lookup with USERNAME focus',
       'GET /api/debug/allUsersWithDetails - All users with USERNAME details'
@@ -878,31 +1021,39 @@ app.use((err, req, res, next) => {
 // ==================== START SERVER ====================
 
 app.listen(PORT, () => {
-  console.log('\n🚀 TimeDoctor API Server with USERNAME PRIORITY Detection');
-  console.log('============================================================');
+  console.log('\n🚀 TimeDoctor API Server with COMPLETE ACTIVITY DATA + USERNAME PRIORITY Detection');
+  console.log('===================================================================================');
   console.log(`📡 Server running on: http://localhost:${PORT}`);
   console.log(`📧 Email: ${config.credentials.email}`);
   console.log(`🏢 Company: ${config.credentials.companyName}`);
+  console.log('\n📊 COMPLETE ACTIVITY DATA FOR N8N:');
+  console.log('==================================');
+  console.log('✅ activities[] - Full activity records with start times, duration, mode');
+  console.log('✅ screenshots[] - Complete screenshot data with scores, categories, titles');  
+  console.log('✅ timeUsage[] - Time usage patterns and records');
+  console.log('✅ disconnections[] - All disconnection events and idle time');
   console.log('\n👤 USERNAME PRIORITY DETECTION:');
   console.log('===============================');
   console.log('✅ "Dev Team" → Real TimeDoctor username (device owner)');
   console.log('✅ "John Smith" → Actual employee name');
   console.log('✅ "Alice Johnson" → Real user identification');
   console.log('✅ WHO OWNS THE LAPTOP/COMPUTER (not random device names)');
-  console.log('\n🔍 TEST ENDPOINTS FOR USERNAMES:');
-  console.log('=================================');
+  console.log('\n🔍 TEST ENDPOINTS FOR COMPLETE ACTIVITY DATA:');
+  console.log('==============================================');
   console.log('👤 GET  /api/getUserName/aLfYIu7-TthUmwrm');
   console.log('👤 GET  /api/getAllUserNames');
+  console.log('📊 GET  /api/monitorAllUsers (NEW: Complete activity data for N8N)');
   console.log('\n🔧 DEBUG ENDPOINTS:');
   console.log('==================');
   console.log('🔧 GET  /api/debug/userLookup/aLfYIu7-TthUmwrm');
   console.log('🔧 GET  /api/debug/allUsersWithDetails');
-  console.log('\n🎉 NOW IDENTIFIES WHO OWNS EACH LAPTOP/COMPUTER!');
-  console.log('================================================');
-  console.log('✅ Your system will show "Dev Team" instead of "Computer-TthUmwrm"');
+  console.log('\n🎉 NOW SENDS COMPLETE ACTIVITY DATA TO N8N!');
+  console.log('=============================================');
+  console.log('✅ Activities, screenshots, timeUsage, disconnections included');
   console.log('✅ Real employee names from TimeDoctor usernames');
-  console.log('✅ Know exactly who owns each device');
-  console.log('\n🔥 Data will start flowing to n8n in 30 seconds with REAL USERNAMES!');
+  console.log('✅ Each user gets complete monitoring arrays in webhook');
+  console.log('✅ Know exactly who owns each device + their full activity data');
+  console.log('\n🔥 COMPLETE monitoring data will start flowing to n8n in 30 seconds!');
 });
 
 module.exports = app;
