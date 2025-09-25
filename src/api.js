@@ -8,7 +8,7 @@ class TimeDoctorAPI {
     this.baseUrl = config.api.baseUrl;
     this.version = config.api.version;
     
-    console.log('👤 TimeDoctorAPI initialized with FIXED USERNAME extraction');
+    console.log('👤 TimeDoctorAPI initialized with DETAILED WEBSITE/APP DATA extraction');
   }
 
   /**
@@ -429,14 +429,165 @@ class TimeDoctorAPI {
     return await this.getUserOwnerInfo(userId);
   }
 
-  // ==================== COMPREHENSIVE USER MONITORING WITH FIXED USERNAME ====================
+  // ==================== NEW: DETAILED WEBSITE & APP USAGE DATA ====================
 
   /**
-   * COMPREHENSIVE USER MONITORING API WITH FIXED USERNAME IDENTIFICATION
-   * Get complete monitoring data for a user with REAL USERNAME like "Levi Daniels"
+   * Get DETAILED Website & App Usage Data (like TimeDoctor dashboard)
+   * This gets the rich data showing docs.google.com (6h 08m), chatgpt.com (4h 53m), etc.
+   */
+  async getDetailedWebsiteAppUsage(params = {}) {
+    console.log('🌐📱 Fetching DETAILED website & app usage data (TimeDoctor dashboard style)...');
+    
+    const companyId = await this.getCompanyId();
+    
+    const queryParams = {
+      company: companyId,
+      from: params.from || new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+      to: params.to || new Date().toISOString().split('T')[0],
+      limit: '1000',
+      ...params
+    };
+    
+    try {
+      // Try multiple TimeDoctor endpoints to get detailed website/app data
+      const endpoints = [
+        '/api/1.0/reports/web-and-app-usage',
+        '/api/1.0/activity/apps',
+        '/api/1.0/activity/websites', 
+        '/api/1.0/activity/productivity',
+        '/api/1.0/reports/activity-summary'
+      ];
+      
+      for (const endpoint of endpoints) {
+        try {
+          console.log(`🔍 Trying endpoint: ${endpoint}`);
+          const result = await this.fetchAllPages(endpoint, queryParams);
+          
+          if (result.data && result.data.length > 0) {
+            console.log(`✅ SUCCESS: Found detailed website/app data from ${endpoint}`);
+            console.log(`📊 Retrieved ${result.data.length} detailed records`);
+            
+            // Log sample data to see structure
+            if (result.data.length > 0) {
+              console.log(`📋 Sample detailed data:`, JSON.stringify(result.data.slice(0, 2), null, 2));
+            }
+            
+            return result;
+          }
+        } catch (endpointError) {
+          console.log(`⚠️ Endpoint ${endpoint} failed: ${endpointError.message}`);
+          continue;
+        }
+      }
+      
+      // Fallback: Enhanced activity summary 
+      console.log(`🔄 Trying enhanced activity summary...`);
+      const enhancedParams = {
+        ...queryParams,
+        detail: 'extended',
+        'include-app-details': 'true',
+        'include-website-details': 'true',
+        'include-productivity': 'true'
+      };
+      
+      const fallbackResult = await this.getUserActivity(params.user, enhancedParams);
+      
+      if (fallbackResult && fallbackResult.data) {
+        console.log(`✅ Got detailed data from enhanced activity summary`);
+        return { data: Array.isArray(fallbackResult.data) ? fallbackResult.data : [fallbackResult.data] };
+      }
+      
+    } catch (error) {
+      console.error(`❌ Error fetching detailed website/app usage: ${error.message}`);
+    }
+    
+    // Return empty result if all attempts fail
+    console.log(`⚠️ Could not fetch detailed website/app usage data`);
+    return { data: [], error: 'No detailed usage data available' };
+  }
+
+  /**
+   * Get User Productivity Breakdown (like TimeDoctor dashboard percentages)
+   */
+  async getUserProductivityBreakdown(params = {}) {
+    console.log('📈 Fetching user productivity breakdown...');
+    
+    const companyId = await this.getCompanyId();
+    
+    const queryParams = {
+      company: companyId,
+      from: params.from || new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+      to: params.to || new Date().toISOString().split('T')[0],
+      ...params
+    };
+    
+    try {
+      // Try productivity-specific endpoints
+      const productivityEndpoints = [
+        '/api/1.0/reports/productivity',
+        '/api/1.0/activity/productivity/summary',
+        '/api/1.0/reports/time-use-breakdown'
+      ];
+      
+      for (const endpoint of productivityEndpoints) {
+        try {
+          console.log(`📊 Trying productivity endpoint: ${endpoint}`);
+          const query = new URLSearchParams(queryParams).toString();
+          const result = await this.request(`${endpoint}?${query}`, { method: 'GET' });
+          
+          if (result && (result.data || result.productivity)) {
+            console.log(`✅ Got productivity breakdown from ${endpoint}`);
+            return result;
+          }
+        } catch (err) {
+          console.log(`⚠️ Productivity endpoint ${endpoint} failed: ${err.message}`);
+          continue;
+        }
+      }
+      
+    } catch (error) {
+      console.error(`❌ Error fetching productivity breakdown: ${error.message}`);
+    }
+    
+    return { data: null, error: 'No productivity breakdown available' };
+  }
+
+  /**
+   * Get Enhanced Activity Summary with Website/App Details
+   */
+  async getEnhancedActivitySummary(params = {}) {
+    console.log('📊 Fetching enhanced activity summary with website/app details...');
+    
+    const companyId = await this.getCompanyId();
+    
+    const queryParams = {
+      company: companyId,
+      from: params.from || new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+      to: params.to || new Date().toISOString().split('T')[0],
+      user: params.user,
+      detail: 'extended',
+      'include-apps': 'true',
+      'include-websites': 'true', 
+      'include-productivity': 'true',
+      'include-categories': 'true',
+      'group-by': 'application,website',
+      ...params
+    };
+    
+    const query = new URLSearchParams(queryParams).toString();
+    const endpoint = `/api/1.0/activity/summary?${query}`;
+    
+    return await this.request(endpoint, { method: 'GET' });
+  }
+
+  // ==================== ENHANCED USER MONITORING WITH DETAILED WEBSITE/APP DATA ====================
+
+  /**
+   * COMPREHENSIVE USER MONITORING WITH DETAILED WEBSITE/APP DATA
+   * Get complete monitoring data INCLUDING detailed website/app usage like TimeDoctor dashboard
    */
   async getCompleteUserMonitoring(userId, params = {}) {
-    console.log(`🕵️ [FIXED] Fetching COMPLETE monitoring data with REAL USERNAME for user ${userId}...`);
+    console.log(`🕵️ [ENHANCED] Fetching COMPLETE monitoring data with DETAILED WEBSITE/APP DATA for user ${userId}...`);
     
     const companyId = await this.getCompanyId();
     
@@ -452,34 +603,32 @@ class TimeDoctorAPI {
     const queryParams = { ...defaultParams, ...params };
     
     try {
-      console.log(`📊 [FIXED] Gathering monitoring data from ${queryParams.from} to ${queryParams.to}...`);
+      console.log(`📊 [ENHANCED] Gathering DETAILED monitoring data from ${queryParams.from} to ${queryParams.to}...`);
       
-      // Fetch all monitoring data in parallel for efficiency
+      // Fetch all monitoring data in parallel INCLUDING new detailed website/app data
       const [
         activityWorklog,
         screenshots,
         timeUseData,
         timeUseStats,
         disconnectivity,
-        totalStats
+        totalStats,
+        detailedWebsiteAppUsage,
+        productivityBreakdown,
+        enhancedActivitySummary
       ] = await Promise.allSettled([
-        // Activity and time tracking
+        // Existing data
         this.getActivityWorklog(queryParams).catch(err => ({ error: err.message, data: [] })),
-        
-        // Screenshots for visual monitoring
         this.getScreenshots(queryParams).catch(err => ({ error: err.message, data: [] })),
-        
-        // Time usage patterns
         this.getActivityTimeuse(queryParams).catch(err => ({ error: err.message, data: [] })),
-        
-        // Productivity statistics
         this.timeuseStats(queryParams).catch(err => ({ error: err.message, data: null })),
-        
-        // Disconnection/idle time monitoring
         this.getDisconnectivity(queryParams).catch(err => ({ error: err.message, data: [] })),
+        this.stats1_total(queryParams).catch(err => ({ error: err.message, data: null })),
         
-        // Overall statistics
-        this.stats1_total(queryParams).catch(err => ({ error: err.message, data: null }))
+        // 🔥 NEW: Detailed website/app usage data (like TimeDoctor dashboard)
+        this.getDetailedWebsiteAppUsage(queryParams).catch(err => ({ error: err.message, data: [] })),
+        this.getUserProductivityBreakdown(queryParams).catch(err => ({ error: err.message, data: null })),
+        this.getEnhancedActivitySummary(queryParams).catch(err => ({ error: err.message, data: null }))
       ]);
 
       // Get user information with FIXED USERNAME extraction
@@ -494,12 +643,12 @@ class TimeDoctorAPI {
         userIdentification = await this.getUserIdentification(userId, userInfo);
         
       } catch (err) {
-        console.warn('[FIXED] Could not fetch user info:', err.message);
+        console.warn('[ENHANCED] Could not fetch user info:', err.message);
         // Try direct lookup
         try {
           userIdentification = await this.getUserOwnerInfo(userId);
         } catch (directErr) {
-          console.warn('[FIXED] Direct user lookup also failed:', directErr.message);
+          console.warn('[ENHANCED] Direct user lookup also failed:', directErr.message);
         }
       }
 
@@ -507,13 +656,12 @@ class TimeDoctorAPI {
       const displayName = userIdentification?.username || 'Unknown User';
       const realEmail = userIdentification?.email || 'Unknown Email';
 
-      console.log(`👤 [FIXED] Final user identification for ${userId}:`);
+      console.log(`👤 [ENHANCED] Final user identification for ${userId}:`);
       console.log(`   Username: ${displayName}`);
       console.log(`   Email: ${realEmail}`);
       console.log(`   Method: ${userIdentification?.lookupMethod || 'none'}`);
-      console.log(`   Success: ${userIdentification?.success || false}`);
 
-      // Process and format the results with FIXED USERNAME
+      // Process and format the results with DETAILED WEBSITE/APP DATA
       const monitoringData = {
         userId: userId,
         companyId: companyId,
@@ -572,7 +720,7 @@ class TimeDoctorAPI {
           }
         },
         
-        // Activity and Time Tracking
+        // Existing activity data
         activitySummary: {
           status: activityWorklog.status === 'fulfilled' ? 'success' : 'error',
           error: activityWorklog.status === 'rejected' ? activityWorklog.reason?.message : null,
@@ -580,7 +728,6 @@ class TimeDoctorAPI {
           data: activityWorklog.value?.data || []
         },
         
-        // Screenshots for monitoring
         screenshots: {
           status: screenshots.status === 'fulfilled' ? 'success' : 'error',
           error: screenshots.status === 'rejected' ? screenshots.reason?.message : null,
@@ -588,7 +735,6 @@ class TimeDoctorAPI {
           data: screenshots.value?.data || []
         },
         
-        // Time usage patterns
         timeUsage: {
           status: timeUseData.status === 'fulfilled' ? 'success' : 'error',
           error: timeUseData.status === 'rejected' ? timeUseData.reason?.message : null,
@@ -596,14 +742,12 @@ class TimeDoctorAPI {
           data: timeUseData.value?.data || []
         },
         
-        // Productivity metrics
         productivityStats: {
           status: timeUseStats.status === 'fulfilled' ? 'success' : 'error',
           error: timeUseStats.status === 'rejected' ? timeUseStats.reason?.message : null,
           data: timeUseStats.value?.data || null
         },
         
-        // Disconnection monitoring
         disconnectionEvents: {
           status: disconnectivity.status === 'fulfilled' ? 'success' : 'error',
           error: disconnectivity.status === 'rejected' ? disconnectivity.reason?.message : null,
@@ -611,11 +755,35 @@ class TimeDoctorAPI {
           data: disconnectivity.value?.data || []
         },
         
-        // Overall statistics
         overallStats: {
           status: totalStats.status === 'fulfilled' ? 'success' : 'error',
           error: totalStats.status === 'rejected' ? totalStats.reason?.message : null,
           data: totalStats.value?.data || null
+        },
+        
+        // 🔥 NEW: DETAILED WEBSITE & APP USAGE DATA (like TimeDoctor dashboard)
+        detailedWebsiteAppUsage: {
+          status: detailedWebsiteAppUsage.status === 'fulfilled' ? 'success' : 'error',
+          error: detailedWebsiteAppUsage.status === 'rejected' ? detailedWebsiteAppUsage.reason?.message : null,
+          totalRecords: detailedWebsiteAppUsage.value?.data?.length || 0,
+          data: detailedWebsiteAppUsage.value?.data || [],
+          description: 'Detailed website/app usage like docs.google.com, chatgpt.com, etc.'
+        },
+        
+        // 🔥 NEW: PRODUCTIVITY BREAKDOWN (percentages like TimeDoctor dashboard)
+        productivityBreakdown: {
+          status: productivityBreakdown.status === 'fulfilled' ? 'success' : 'error',
+          error: productivityBreakdown.status === 'rejected' ? productivityBreakdown.reason?.message : null,
+          data: productivityBreakdown.value?.data || null,
+          description: 'Productivity percentages (69% productive, 22% unproductive, etc.)'
+        },
+        
+        // 🔥 NEW: ENHANCED ACTIVITY SUMMARY (with app/website details)
+        enhancedActivitySummary: {
+          status: enhancedActivitySummary.status === 'fulfilled' ? 'success' : 'error',
+          error: enhancedActivitySummary.status === 'rejected' ? enhancedActivitySummary.reason?.message : null,
+          data: enhancedActivitySummary.value?.data || null,
+          description: 'Enhanced activity summary with detailed app/website breakdown'
         },
         
         // Summary metrics
@@ -624,43 +792,49 @@ class TimeDoctorAPI {
           totalActiveTime: 0,
           totalScreenshots: screenshots.value?.data?.length || 0,
           totalDisconnections: disconnectivity.value?.data?.length || 0,
+          totalDetailedUsageRecords: detailedWebsiteAppUsage.value?.data?.length || 0,
           monitoringPeriod: `${queryParams.from} to ${queryParams.to}`,
           dataCollectedAt: new Date().toISOString(),
           
           // Primary identification
           username: displayName,
-          userIdentification: userIdentification
+          userIdentification: userIdentification,
+          
+          // Enhanced summary
+          hasDetailedUsageData: (detailedWebsiteAppUsage.value?.data?.length || 0) > 0,
+          hasProductivityBreakdown: !!productivityBreakdown.value?.data
         }
       };
 
-      // Calculate if we have any monitoring data
+      // Calculate if we have any monitoring data (including new detailed data)
       monitoringData.summary.hasData = 
         monitoringData.activitySummary.totalRecords > 0 ||
         monitoringData.screenshots.totalScreenshots > 0 ||
         monitoringData.timeUsage.totalRecords > 0 ||
-        monitoringData.disconnectionEvents.totalEvents > 0;
+        monitoringData.disconnectionEvents.totalEvents > 0 ||
+        monitoringData.detailedWebsiteAppUsage.totalRecords > 0;
 
-      console.log(`✅ [FIXED] Complete monitoring data retrieved for user ${userId}`);
-      console.log(`   👤 FINAL USERNAME: ${displayName} (${userIdentification?.lookupMethod || 'none'})`);
+      console.log(`✅ [ENHANCED] Complete monitoring data with DETAILED WEBSITE/APP USAGE retrieved for user ${userId}`);
+      console.log(`   👤 USERNAME: ${displayName} (${userIdentification?.lookupMethod || 'none'})`);
       console.log(`   📧 Email: ${realEmail}`);
-      console.log(`   🖥️ Computer: ${userIdentification?.computerName || 'Unknown'}`);
       console.log(`   📊 Activity records: ${monitoringData.activitySummary.totalRecords}`);
       console.log(`   📸 Screenshots: ${monitoringData.screenshots.totalScreenshots}`);
-      console.log(`   📈 Has monitoring data: ${monitoringData.summary.hasData}`);
+      console.log(`   🌐 Detailed website/app records: ${monitoringData.detailedWebsiteAppUsage.totalRecords}`);
+      console.log(`   📈 Has detailed usage data: ${monitoringData.summary.hasDetailedUsageData}`);
 
       return monitoringData;
 
     } catch (error) {
-      console.error(`❌ [FIXED] Error fetching monitoring data for user ${userId}:`, error.message);
-      throw new Error(`Failed to fetch monitoring data: ${error.message}`);
+      console.error(`❌ [ENHANCED] Error fetching detailed monitoring data for user ${userId}:`, error.message);
+      throw new Error(`Failed to fetch enhanced monitoring data: ${error.message}`);
     }
   }
 
   /**
-   * MONITOR ALL USERS - Get monitoring data for all users with FIXED USERNAMES
+   * MONITOR ALL USERS with DETAILED WEBSITE/APP DATA
    */
   async getAllUsersMonitoring(params = {}) {
-    console.log('👥🕵️ [FIXED] Fetching monitoring data for ALL users with REAL USERNAMES...');
+    console.log('👥🕵️ [ENHANCED] Fetching monitoring data for ALL users with DETAILED WEBSITE/APP DATA...');
     
     try {
       // First get all users
@@ -675,7 +849,7 @@ class TimeDoctorAPI {
         };
       }
 
-      console.log(`📊 [FIXED] Found ${userList.length} users to monitor with FIXED USERNAME identification`);
+      console.log(`📊 [ENHANCED] Found ${userList.length} users to monitor with DETAILED WEBSITE/APP DATA`);
       
       // Monitor each user (sequential to avoid overwhelming the API)
       const allMonitoringData = [];
@@ -687,10 +861,10 @@ class TimeDoctorAPI {
           const userIdentification = await this.getUserIdentification(user.id, user);
           username = userIdentification.username;
           
-          console.log(`🔍 [FIXED] Monitoring user: "${username}" (ID: ${user.id})`);
+          console.log(`🔍 [ENHANCED] Monitoring user: "${username}" (ID: ${user.id}) with DETAILED DATA`);
         } catch (userError) {
           username = this.extractRealUsername(user) || `User ${user.id.substring(0, 8)}`;
-          console.log(`🔍 [FIXED] Monitoring user: "${username}" (Fallback) - ${user.id}`);
+          console.log(`🔍 [ENHANCED] Monitoring user: "${username}" (Fallback) - ${user.id}`);
         }
         
         try {
@@ -701,7 +875,7 @@ class TimeDoctorAPI {
           await new Promise(resolve => setTimeout(resolve, 200));
           
         } catch (error) {
-          console.warn(`⚠️ [FIXED] Failed to monitor user ${user.id}: ${error.message}`);
+          console.warn(`⚠️ [ENHANCED] Failed to monitor user ${user.id}: ${error.message}`);
           allMonitoringData.push({
             userId: user.id,
             username: username,
@@ -718,32 +892,38 @@ class TimeDoctorAPI {
                 identificationMethod: 'error_fallback'
               }
             },
-            summary: { hasData: false, username: username }
+            summary: { hasData: false, username: username, hasDetailedUsageData: false }
           });
         }
       }
 
-      // Calculate overall summary
+      // Calculate overall summary including detailed data metrics
       const totalWithData = allMonitoringData.filter(u => u.summary?.hasData).length;
+      const totalWithDetailedData = allMonitoringData.filter(u => u.summary?.hasDetailedUsageData).length;
       const totalScreenshots = allMonitoringData.reduce((sum, u) => sum + (u.screenshots?.totalScreenshots || 0), 0);
       const totalActivityRecords = allMonitoringData.reduce((sum, u) => sum + (u.activitySummary?.totalRecords || 0), 0);
+      const totalDetailedUsageRecords = allMonitoringData.reduce((sum, u) => sum + (u.detailedWebsiteAppUsage?.totalRecords || 0), 0);
       const usernamesFound = allMonitoringData.filter(u => u.username && u.username !== 'Unknown User' && !u.username.startsWith('User ')).length;
 
-      console.log(`✅ [FIXED] USERNAME monitoring complete for all users`);
+      console.log(`✅ [ENHANCED] Detailed monitoring complete for all users`);
       console.log(`   👥 Total users monitored: ${allMonitoringData.length}`);
       console.log(`   📊 Users with data: ${totalWithData}`);
       console.log(`   👤 REAL USERNAMES identified: ${usernamesFound}`);
       console.log(`   📸 Total screenshots: ${totalScreenshots}`);
       console.log(`   📈 Total activity records: ${totalActivityRecords}`);
+      console.log(`   🌐 Users with detailed website/app data: ${totalWithDetailedData}`);
+      console.log(`   🌐 Total detailed usage records: ${totalDetailedUsageRecords}`);
 
       return {
         success: true,
         summary: {
           totalUsers: allMonitoringData.length,
           usersWithData: totalWithData,
+          usersWithDetailedData: totalWithDetailedData,
           usernamesIdentified: usernamesFound,
           totalScreenshots: totalScreenshots,
           totalActivityRecords: totalActivityRecords,
+          totalDetailedUsageRecords: totalDetailedUsageRecords,
           monitoringPeriod: `${params.from || 'last 7 days'} to ${params.to || 'today'}`,
           generatedAt: new Date().toISOString()
         },
@@ -751,8 +931,8 @@ class TimeDoctorAPI {
       };
 
     } catch (error) {
-      console.error('❌ [FIXED] Error monitoring all users:', error.message);
-      throw new Error(`Failed to monitor all users: ${error.message}`);
+      console.error('❌ [ENHANCED] Error monitoring all users:', error.message);
+      throw new Error(`Failed to monitor all users with detailed data: ${error.message}`);
     }
   }
 
