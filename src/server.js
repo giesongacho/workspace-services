@@ -27,14 +27,14 @@ app.use((req, res, next) => {
   next();
 });
 
-// ==================== ENHANCED COMPUTER NAME ENDPOINTS ====================
+// ==================== USERNAME IDENTIFICATION ENDPOINTS ====================
 
 /**
- * @route   GET /api/getRealComputerName/:userId
- * @desc    Get the REAL computer name (like "Macbooks-MacBook-Air.local") for a user
+ * @route   GET /api/getUserName/:userId
+ * @desc    Get the REAL USERNAME from TimeDoctor (like "Dev Team") to identify who owns the laptop
  * @param   userId - User ID to lookup
  */
-app.get('/api/getRealComputerName/:userId', async (req, res) => {
+app.get('/api/getUserName/:userId', async (req, res) => {
   try {
     const userId = req.params.userId;
     
@@ -42,77 +42,83 @@ app.get('/api/getRealComputerName/:userId', async (req, res) => {
       return res.status(400).json({
         success: false,
         error: 'User ID is required',
-        example: 'GET /api/getRealComputerName/aLfYIu7-TthUmwrm'
+        example: 'GET /api/getUserName/aLfYIu7-TthUmwrm'
       });
     }
 
-    console.log(`🖥️ REAL computer name lookup requested for: ${userId}`);
+    console.log(`👤 USERNAME lookup requested for: ${userId}`);
     
-    // Get enhanced device information
-    const enhancedDeviceInfo = await api.getEnhancedDeviceInfo(userId);
+    // Get the real username identification
+    const userIdentification = await api.getUserOwnerInfo(userId);
     
     const response = {
       userId: userId,
-      success: enhancedDeviceInfo.realNameFound,
-      realComputerName: enhancedDeviceInfo.realComputerName,
-      hostname: enhancedDeviceInfo.hostname,
-      deviceType: enhancedDeviceInfo.deviceType,
-      operatingSystem: enhancedDeviceInfo.operatingSystem,
-      ipAddress: enhancedDeviceInfo.ipAddress,
-      lookupMethod: enhancedDeviceInfo.lookupMethod,
-      confidenceLevel: enhancedDeviceInfo.confidenceLevel,
-      fallbackName: enhancedDeviceInfo.patternDeviceName,
-      finalComputerName: enhancedDeviceInfo.finalComputerName,
-      lastSeen: enhancedDeviceInfo.lastSeen,
-      error: enhancedDeviceInfo.error,
+      success: userIdentification.success,
       
-      // Debug information
+      // 👤 PRIMARY: Username information
+      username: userIdentification.username,
+      fullName: userIdentification.fullName,
+      email: userIdentification.email,
+      
+      // Secondary information
+      timezone: userIdentification.timezone,
+      role: userIdentification.role,
+      status: userIdentification.status,
+      computerName: userIdentification.computerName,
+      
+      // Lookup metadata
+      lookupMethod: userIdentification.lookupMethod,
+      confidence: userIdentification.confidence,
+      error: userIdentification.error,
+      
+      // Display information
+      displayName: userIdentification.username,
+      whoOwnsThisDevice: userIdentification.username,
+      
       debug: {
+        message: userIdentification.success 
+          ? `✅ SUCCESS: "${userIdentification.username}" owns this laptop/computer`
+          : `⚠️ FALLBACK: Using "${userIdentification.username}" as identifier`,
         strategies: [
-          '1. User details lookup',
-          '2. Activity records lookup',
-          '3. Screenshot metadata lookup', 
-          '4. Worklog records lookup',
-          '5. Session/connection info lookup'
+          '1. Direct TimeDoctor user lookup',
+          '2. Company user list search',
+          '3. Activity data username lookup'
         ],
-        actualLookupMethod: enhancedDeviceInfo.lookupMethod,
-        realNameFound: enhancedDeviceInfo.realNameFound,
-        recommendation: enhancedDeviceInfo.realNameFound 
-          ? `✅ SUCCESS: Real computer name found: ${enhancedDeviceInfo.realComputerName}`
-          : `⚠️ FALLBACK: Using pattern-based name: ${enhancedDeviceInfo.finalComputerName}`
+        actualMethod: userIdentification.lookupMethod,
+        confidence: userIdentification.confidence
       }
     };
     
-    if (enhancedDeviceInfo.realNameFound) {
-      console.log(`✅ REAL computer name found: ${enhancedDeviceInfo.realComputerName} (${enhancedDeviceInfo.lookupMethod})`);
+    if (userIdentification.success) {
+      console.log(`✅ USERNAME found: "${userIdentification.username}" owns this device (${userIdentification.lookupMethod})`);
     } else {
-      console.log(`⚠️ Using fallback: ${enhancedDeviceInfo.finalComputerName} (${enhancedDeviceInfo.lookupMethod})`);
+      console.log(`⚠️ Using fallback: "${userIdentification.username}" (${userIdentification.lookupMethod})`);
     }
     
     res.json({
       success: true,
-      message: `Computer name lookup completed for ${userId}`,
+      message: `Username lookup completed for ${userId}`,
       data: response
     });
     
   } catch (error) {
-    console.error(`❌ REAL computer name lookup error for ${req.params.userId}:`, error.message);
+    console.error(`❌ USERNAME lookup error for ${req.params.userId}:`, error.message);
     res.status(500).json({
       success: false,
       error: error.message,
       userId: req.params.userId,
-      message: 'Failed to get real computer name'
+      message: 'Failed to get username'
     });
   }
 });
 
 /**
- * @route   GET /api/getAllRealComputerNames
- * @desc    Get REAL computer names for ALL users in the company
+ * @route   GET /api/getAllUserNames
+ * @desc    Get USERNAMES for ALL users in the company to identify who owns each laptop/computer
  */
-app.get('/api/getAllRealComputerNames', async (req, res) => {
+app.get('/api/getAllUserNames', async (req, res) => {
   try {
-    console.log('🖥️ Getting REAL computer names for ALL users...');
+    console.log('👤 Getting USERNAMES for ALL users (laptop/computer owners)...');
     
     // Get all users first
     const users = await api.getUsers({ limit: 1000 });
@@ -124,113 +130,134 @@ app.get('/api/getAllRealComputerNames', async (req, res) => {
         message: 'No users found in company',
         data: {
           totalUsers: 0,
-          realNamesFound: 0,
+          usernamesFound: 0,
           users: []
         }
       });
     }
 
-    console.log(`📊 Found ${userList.length} users to check for real computer names`);
+    console.log(`📊 Found ${userList.length} users to get usernames for`);
     
-    const allComputerNames = [];
-    let realNamesFound = 0;
+    const allUserNames = [];
+    let usernamesFound = 0;
     
-    // Check each user for real computer name
+    // Get username for each user
     for (const user of userList) {
       try {
-        console.log(`🔍 Checking real computer name for user ${user.id}...`);
+        console.log(`🔍 Getting username for user ${user.id}...`);
         
-        const enhancedInfo = await api.getEnhancedDeviceInfo(user.id, user);
+        const userIdentification = await api.getUserIdentification(user.id, user);
         
-        const userComputerInfo = {
+        const userNameInfo = {
           userId: user.id,
-          userName: user.name || 'Unknown User',
-          userEmail: user.email || 'Unknown Email',
           
-          // Computer name information
-          realComputerName: enhancedInfo.realComputerName,
-          hostname: enhancedInfo.hostname,
-          deviceType: enhancedInfo.deviceType,
-          operatingSystem: enhancedInfo.operatingSystem,
-          ipAddress: enhancedInfo.ipAddress,
-          finalComputerName: enhancedInfo.finalComputerName,
+          // 👤 PRIMARY: Who owns this laptop/computer
+          username: userIdentification.username,
+          fullName: userIdentification.fullName,
+          email: userIdentification.email,
+          whoOwnsThisDevice: userIdentification.username,
+          
+          // Secondary information
+          timezone: userIdentification.timezone,
+          role: userIdentification.role,
+          status: userIdentification.status,
+          computerName: userIdentification.computerName,
           
           // Lookup metadata
-          lookupMethod: enhancedInfo.lookupMethod,
-          realNameFound: enhancedInfo.realNameFound,
-          confidenceLevel: enhancedInfo.confidenceLevel,
-          lastSeen: enhancedInfo.lastSeen,
+          lookupMethod: userIdentification.lookupMethod,
+          success: userIdentification.success,
+          confidence: userIdentification.confidence,
           
-          // Status
-          status: enhancedInfo.realNameFound ? '✅ REAL NAME FOUND' : '⚠️ USING FALLBACK',
-          displayName: enhancedInfo.realNameFound 
-            ? `${enhancedInfo.realComputerName} (REAL)`
-            : `${enhancedInfo.finalComputerName} (Fallback)`
+          // Status display
+          status: userIdentification.success ? '✅ USERNAME FOUND' : '⚠️ USING FALLBACK',
+          displayName: `${userIdentification.username} (${userIdentification.confidence} confidence)`,
+          
+          // Ownership information
+          deviceOwner: userIdentification.username,
+          ownershipInfo: userIdentification.success 
+            ? `${userIdentification.username} owns this laptop/computer`
+            : `Identified as: ${userIdentification.username}`
         };
         
-        if (enhancedInfo.realNameFound) {
-          realNamesFound++;
-          console.log(`  ✅ REAL: ${enhancedInfo.realComputerName} (${enhancedInfo.lookupMethod})`);
+        if (userIdentification.success && 
+            userIdentification.username !== 'Unknown User' && 
+            !userIdentification.username.startsWith('User ')) {
+          usernamesFound++;
+          console.log(`  ✅ USERNAME: "${userIdentification.username}" (${userIdentification.lookupMethod})`);
         } else {
-          console.log(`  ⚠️ Fallback: ${enhancedInfo.finalComputerName}`);
+          console.log(`  ⚠️ Fallback: "${userIdentification.username}"`);
         }
         
-        allComputerNames.push(userComputerInfo);
+        allUserNames.push(userNameInfo);
         
         // Small delay to avoid overwhelming the API
         await new Promise(resolve => setTimeout(resolve, 100));
         
       } catch (error) {
-        console.error(`❌ Failed to get computer name for user ${user.id}: ${error.message}`);
-        allComputerNames.push({
+        console.error(`❌ Failed to get username for user ${user.id}: ${error.message}`);
+        allUserNames.push({
           userId: user.id,
-          userName: user.name || 'Unknown User',
-          userEmail: user.email || 'Unknown Email',
-          realComputerName: null,
-          finalComputerName: 'Error getting computer name',
+          username: user.name || user.username || `User ${user.id.substring(0, 8)}`,
+          fullName: user.fullName || user.name || null,
+          email: user.email || null,
+          whoOwnsThisDevice: user.name || 'Unknown Owner',
           lookupMethod: 'error',
-          realNameFound: false,
-          confidenceLevel: 'none',
+          success: false,
+          confidence: 'none',
           status: '❌ ERROR',
-          error: error.message
+          error: error.message,
+          deviceOwner: 'Error getting owner',
+          ownershipInfo: 'Could not determine laptop/computer owner'
         });
       }
     }
 
-    // Sort by real names found first, then by computer name
-    allComputerNames.sort((a, b) => {
-      if (a.realNameFound && !b.realNameFound) return -1;
-      if (!a.realNameFound && b.realNameFound) return 1;
-      return (a.finalComputerName || '').localeCompare(b.finalComputerName || '');
+    // Sort by successful usernames first, then by username
+    allUserNames.sort((a, b) => {
+      if (a.success && !b.success) return -1;
+      if (!a.success && b.success) return 1;
+      return (a.username || '').localeCompare(b.username || '');
     });
 
-    console.log(`✅ Computer name lookup complete for all users`);
-    console.log(`   👥 Total users: ${allComputerNames.length}`);
-    console.log(`   🖥️ REAL computer names found: ${realNamesFound}`);
-    console.log(`   📊 Success rate: ${Math.round((realNamesFound / allComputerNames.length) * 100)}%`);
+    console.log(`✅ Username lookup complete for all users`);
+    console.log(`   👥 Total users: ${allUserNames.length}`);
+    console.log(`   👤 REAL usernames found: ${usernamesFound}`);
+    console.log(`   📊 Success rate: ${Math.round((usernamesFound / allUserNames.length) * 100)}%`);
 
     res.json({
       success: true,
-      message: `Computer name lookup completed for all ${allComputerNames.length} users`,
+      message: `Username lookup completed for all ${allUserNames.length} users`,
       data: {
-        totalUsers: allComputerNames.length,
-        realNamesFound: realNamesFound,
-        successRate: `${Math.round((realNamesFound / allComputerNames.length) * 100)}%`,
+        totalUsers: allUserNames.length,
+        usernamesFound: usernamesFound,
+        successRate: `${Math.round((usernamesFound / allUserNames.length) * 100)}%`,
+        
         summary: {
-          realComputerNames: allComputerNames.filter(u => u.realNameFound),
-          fallbackNames: allComputerNames.filter(u => !u.realNameFound && !u.error),
-          errors: allComputerNames.filter(u => u.error)
+          identifiedOwners: allUserNames.filter(u => u.success),
+          fallbackIdentifiers: allUserNames.filter(u => !u.success && !u.error),
+          errors: allUserNames.filter(u => u.error)
         },
-        users: allComputerNames
+        
+        // 👤 WHO OWNS WHICH LAPTOP/COMPUTER
+        laptopOwners: allUserNames.map(u => ({
+          userId: u.userId,
+          deviceOwner: u.deviceOwner,
+          username: u.username,
+          email: u.email,
+          computer: u.computerName || 'Unknown Computer',
+          ownershipInfo: u.ownershipInfo
+        })),
+        
+        users: allUserNames
       }
     });
     
   } catch (error) {
-    console.error('❌ Error getting all real computer names:', error.message);
+    console.error('❌ Error getting all usernames:', error.message);
     res.status(500).json({
       success: false,
       error: error.message,
-      message: 'Failed to get real computer names for all users'
+      message: 'Failed to get usernames for all users'
     });
   }
 });
@@ -256,25 +283,30 @@ app.get('/api/n8n/lookupUser/:userId', async (req, res) => {
 
     console.log(`🔍 N8N User lookup requested for: ${userId}`);
     
-    // Get user details from TimeDoctor API
-    const userDetails = await api.getUser(userId);
+    // Get user details with USERNAME priority
+    const userIdentification = await api.getUserOwnerInfo(userId);
     
     // Extract the essential info for n8n
     const lookupResult = {
       userId: userId,
-      realName: userDetails.name || 'Name not available',
-      realEmail: userDetails.email || 'Email not available',
-      timezone: userDetails.timezone || 'Unknown',
-      role: userDetails.role || 'Unknown',
-      status: userDetails.status || 'Unknown',
-      fullUserData: userDetails // Complete user object for reference
+      realName: userIdentification.username,
+      realEmail: userIdentification.email || 'Email not available',
+      timezone: userIdentification.timezone || 'Unknown',
+      role: userIdentification.role || 'Unknown',
+      status: userIdentification.status || 'Unknown',
+      
+      // WHO OWNS THIS DEVICE
+      deviceOwner: userIdentification.username,
+      whoOwnsThisLaptop: userIdentification.username,
+      
+      fullUserData: userIdentification // Complete user object for reference
     };
     
-    console.log(`✅ Found user: ${lookupResult.realName} (${lookupResult.realEmail})`);
+    console.log(`✅ Found device owner: "${lookupResult.realName}" (${lookupResult.realEmail})`);
     
     res.json({
       success: true,
-      message: `User lookup successful for ${userId}`,
+      message: `User lookup successful - ${lookupResult.realName} owns this device`,
       data: lookupResult
     });
   } catch (error) {
@@ -291,7 +323,7 @@ app.get('/api/n8n/lookupUser/:userId', async (req, res) => {
 
 /**
  * @route   GET /api/debug/userLookup/:userId
- * @desc    DEBUG endpoint to diagnose user lookup issues
+ * @desc    DEBUG endpoint to diagnose user lookup issues WITH USERNAME PRIORITY
  */
 app.get('/api/debug/userLookup/:userId', async (req, res) => {
   try {
@@ -325,6 +357,7 @@ app.get('/api/debug/userLookup/:userId', async (req, res) => {
         users: allUsers.data?.map(user => ({
           id: user.id,
           name: user.name || 'NO NAME',
+          username: user.username || 'NO USERNAME',
           email: user.email || 'NO EMAIL',
           role: user.role || 'NO ROLE',
           status: user.status || 'NO STATUS'
@@ -357,6 +390,7 @@ app.get('/api/debug/userLookup/:userId', async (req, res) => {
         userData: {
           id: directUser.id || 'NO ID',
           name: directUser.name || 'NO NAME',
+          username: directUser.username || 'NO USERNAME',
           email: directUser.email || 'NO EMAIL',
           timezone: directUser.timezone || 'NO TIMEZONE',
           role: directUser.role || 'NO ROLE',
@@ -372,57 +406,67 @@ app.get('/api/debug/userLookup/:userId', async (req, res) => {
       debugInfo.debugSteps.push(`❌ Direct lookup: FAILED - ${directError.message}`);
     }
 
-    // NEW Step 4: Try enhanced computer name lookup
-    debugInfo.debugSteps.push('Step 4: Attempting REAL computer name lookup...');
+    // NEW Step 4: Try USERNAME identification lookup
+    debugInfo.debugSteps.push('Step 4: Attempting USERNAME identification lookup...');
     try {
-      const enhancedDeviceInfo = await api.getEnhancedDeviceInfo(userId);
-      debugInfo.computerNameLookup = {
-        success: enhancedDeviceInfo.realNameFound,
-        realComputerName: enhancedDeviceInfo.realComputerName,
-        hostname: enhancedDeviceInfo.hostname,
-        lookupMethod: enhancedDeviceInfo.lookupMethod,
-        confidenceLevel: enhancedDeviceInfo.confidenceLevel,
-        finalComputerName: enhancedDeviceInfo.finalComputerName,
-        error: enhancedDeviceInfo.error
+      const userIdentification = await api.getUserOwnerInfo(userId);
+      debugInfo.usernameIdentification = {
+        success: userIdentification.success,
+        username: userIdentification.username,
+        fullName: userIdentification.fullName,
+        email: userIdentification.email,
+        lookupMethod: userIdentification.lookupMethod,
+        confidence: userIdentification.confidence,
+        whoOwnsDevice: userIdentification.username,
+        error: userIdentification.error
       };
       
-      if (enhancedDeviceInfo.realNameFound) {
-        debugInfo.debugSteps.push(`✅ REAL computer name: ${enhancedDeviceInfo.realComputerName} (${enhancedDeviceInfo.lookupMethod})`);
+      if (userIdentification.success) {
+        debugInfo.debugSteps.push(`✅ USERNAME identification: "${userIdentification.username}" owns this device (${userIdentification.lookupMethod})`);
       } else {
-        debugInfo.debugSteps.push(`⚠️ Using fallback: ${enhancedDeviceInfo.finalComputerName}`);
+        debugInfo.debugSteps.push(`⚠️ Using fallback identifier: "${userIdentification.username}"`);
       }
-    } catch (computerError) {
-      debugInfo.computerNameLookup = {
+    } catch (usernameError) {
+      debugInfo.usernameIdentification = {
         success: false,
-        error: computerError.message
+        error: usernameError.message
       };
-      debugInfo.debugSteps.push(`❌ Computer name lookup: FAILED - ${computerError.message}`);
+      debugInfo.debugSteps.push(`❌ Username identification: FAILED - ${usernameError.message}`);
     }
     
-    // Final diagnosis (UPDATED to include computer name info)
-    if (debugInfo.userFound && debugInfo.matchedUser.name !== 'NO NAME') {
-      debugInfo.diagnosis = 'SUCCESS: User can be identified for monitoring';
+    // Final diagnosis (UPDATED to prioritize USERNAME)
+    if (debugInfo.usernameIdentification?.success) {
+      debugInfo.diagnosis = 'SUCCESS: Device owner identified via USERNAME';
+      debugInfo.deviceOwner = debugInfo.usernameIdentification.username;
+      debugInfo.monitoringName = debugInfo.usernameIdentification.username;
+      debugInfo.monitoringEmail = debugInfo.usernameIdentification.email || 'Email not available';
+      debugInfo.confidenceLevel = debugInfo.usernameIdentification.confidence;
+    } else if (debugInfo.userFound && debugInfo.matchedUser.name !== 'NO NAME') {
+      debugInfo.diagnosis = 'SUCCESS: User identified via direct lookup';
+      debugInfo.deviceOwner = debugInfo.matchedUser.name;
       debugInfo.monitoringName = debugInfo.matchedUser.name;
       debugInfo.monitoringEmail = debugInfo.matchedUser.email;
-    } else if (debugInfo.computerNameLookup?.success) {
-      debugInfo.diagnosis = 'SUCCESS: User identified via REAL computer name';
-      debugInfo.monitoringName = debugInfo.computerNameLookup.realComputerName;
-      debugInfo.monitoringEmail = debugInfo.matchedUser?.email || 'Email not available';
-    } else if (debugInfo.userFound) {
-      debugInfo.diagnosis = 'PARTIAL: User found but missing name/email data - using device name extraction';
-      debugInfo.monitoringName = debugInfo.computerNameLookup?.finalComputerName || `User ${userId.slice(0, 8)}`;
-      debugInfo.monitoringEmail = debugInfo.matchedUser?.email || 'Email not available';
+      debugInfo.confidenceLevel = 'medium';
+    } else if (debugInfo.usernameIdentification?.username) {
+      debugInfo.diagnosis = 'PARTIAL: Using fallback identification';
+      debugInfo.deviceOwner = debugInfo.usernameIdentification.username;
+      debugInfo.monitoringName = debugInfo.usernameIdentification.username;
+      debugInfo.monitoringEmail = 'Email not available';
+      debugInfo.confidenceLevel = 'low';
     } else {
-      debugInfo.diagnosis = 'FAILED: Cannot identify user for monitoring';
+      debugInfo.diagnosis = 'FAILED: Cannot identify device owner';
+      debugInfo.deviceOwner = 'Unknown Owner';
       debugInfo.monitoringName = 'Unknown User';
       debugInfo.monitoringEmail = 'unknown@company.com';
+      debugInfo.confidenceLevel = 'none';
     }
     
     debugInfo.debugSteps.push(`🎯 FINAL DIAGNOSIS: ${debugInfo.diagnosis}`);
+    debugInfo.debugSteps.push(`👤 DEVICE OWNER: ${debugInfo.deviceOwner}`);
     
     res.json({
       success: true,
-      message: 'User lookup debugging completed',
+      message: 'Username identification debugging completed',
       debug: debugInfo
     });
     
@@ -437,11 +481,11 @@ app.get('/api/debug/userLookup/:userId', async (req, res) => {
 
 /**
  * @route   GET /api/debug/allUsersWithDetails
- * @desc    Get all TimeDoctor users with full details for monitoring setup
+ * @desc    Get all TimeDoctor users with USERNAME focus for device ownership
  */
 app.get('/api/debug/allUsersWithDetails', async (req, res) => {
   try {
-    console.log('🔍 Debug: Fetching all users with full details...');
+    console.log('🔍 Debug: Fetching all users with USERNAME details...');
     
     const allUsers = await api.getUsers({ 
       limit: 1000,
@@ -450,23 +494,38 @@ app.get('/api/debug/allUsersWithDetails', async (req, res) => {
     
     const userDetails = allUsers.data?.map(user => ({
       userId: user.id,
-      name: user.name || 'NO NAME AVAILABLE',
+      username: user.name || user.username || 'NO USERNAME AVAILABLE',
+      fullName: user.fullName || user.name || null,
       email: user.email || 'NO EMAIL AVAILABLE',
       role: user.role || 'Unknown',
       status: user.status || 'Unknown',
       timezone: user.timezone || 'Unknown',
+      
+      // WHO OWNS THIS DEVICE
+      deviceOwner: user.name || user.username || 'Unknown Owner',
+      whoOwnsThisLaptop: user.name || user.username || 'Unknown Owner',
+      
       monitoringReady: !!(user.name && user.email),
-      displayName: user.name || user.email?.split('@')[0] || `User ${user.id.substring(0, 8)}`
+      displayName: user.name || user.username || user.email?.split('@')[0] || `User ${user.id.substring(0, 8)}`
     })) || [];
     
     res.json({
       success: true,
-      message: `Found ${userDetails.length} users in TimeDoctor account`,
+      message: `Found ${userDetails.length} users in TimeDoctor account with USERNAME focus`,
       data: {
         totalUsers: userDetails.length,
-        usersWithNames: userDetails.filter(u => u.name !== 'NO NAME AVAILABLE').length,
+        usersWithUsernames: userDetails.filter(u => u.username !== 'NO USERNAME AVAILABLE').length,
         usersWithEmails: userDetails.filter(u => u.email !== 'NO EMAIL AVAILABLE').length,
         monitoringReadyUsers: userDetails.filter(u => u.monitoringReady).length,
+        
+        // WHO OWNS WHICH LAPTOP/COMPUTER
+        deviceOwnership: userDetails.map(u => ({
+          userId: u.userId,
+          deviceOwner: u.deviceOwner,
+          username: u.username,
+          email: u.email
+        })),
+        
         users: userDetails
       }
     });
@@ -482,196 +541,106 @@ app.get('/api/debug/allUsersWithDetails', async (req, res) => {
 // ==================== N8N WEBHOOK FUNCTIONS ====================
 
 /**
- * Send individual user data to n8n webhook WITH ENHANCED AUTOMATIC REAL USER NAME LOOKUP
+ * Send individual user data to n8n webhook WITH USERNAME PRIORITY
  * @param {object} userData - Individual user monitoring data
  * @returns {Promise<boolean>} Success status
  */
 async function sendUserDataToN8N(userData) {
   try {
-    // 🔍 ENHANCED REAL USER DATA LOOKUP WITH MULTIPLE STRATEGIES
+    // 👤 USERNAME PRIORITY LOOKUP - Focus on identifying WHO owns the device
+    let deviceOwner = 'Unknown Owner';
     let realUserName = 'Name not available';
     let realUserEmail = 'Email not available';
     let realUserTimezone = 'Unknown';
     let realUserRole = 'Unknown';
     let lookupMethod = 'none';
     let lookupError = null;
+    let confidence = 'low';
     
     const userId = userData.userId;
     
     if (userId && userId !== 'undefined') {
-      console.log(`🔍 Enhanced lookup for user: ${userId}`);
+      console.log(`👤 USERNAME priority lookup for user: ${userId}`);
       
       try {
-        // STRATEGY 1: Direct user lookup by ID
-        console.log(`🔍 Strategy 1: Direct user lookup for ${userId}`);
-        const userDetails = await api.getUser(userId);
+        // Get the USERNAME to identify device owner
+        const userIdentification = await api.getUserOwnerInfo(userId);
         
-        if (userDetails && (userDetails.name || userDetails.email)) {
-          realUserName = userDetails.name || userDetails.email?.split('@')[0] || 'Name not available';
-          realUserEmail = userDetails.email || 'Email not available';
-          realUserTimezone = userDetails.timezone || 'Unknown';
-          realUserRole = userDetails.role || 'Unknown';
-          lookupMethod = 'direct_lookup';
+        if (userIdentification.success) {
+          deviceOwner = userIdentification.username;
+          realUserName = userIdentification.username;
+          realUserEmail = userIdentification.email || 'Email not available';
+          realUserTimezone = userIdentification.timezone || 'Unknown';
+          realUserRole = userIdentification.role || 'Unknown';
+          lookupMethod = userIdentification.lookupMethod;
+          confidence = userIdentification.confidence;
           
-          console.log(`✅ Strategy 1 SUCCESS: Found user: ${realUserName} (${realUserEmail})`);
+          console.log(`✅ Device owner identified: "${deviceOwner}" (${lookupMethod})`);
         } else {
-          throw new Error('User found but no name/email data');
+          // Use fallback but still try to get a meaningful identifier
+          deviceOwner = userIdentification.username || 'Unknown Owner';
+          realUserName = deviceOwner;
+          lookupMethod = userIdentification.lookupMethod;
+          lookupError = userIdentification.error;
+          confidence = 'very_low';
+          
+          console.log(`⚠️ Using fallback device owner: "${deviceOwner}"`);
         }
         
-      } catch (directLookupError) {
-        console.error(`⚠️ Strategy 1 failed: ${directLookupError.message}`);
-        lookupError = directLookupError.message;
-        
-        try {
-          // STRATEGY 2: Search through all users to find matching ID
-          console.log(`🔍 Strategy 2: Searching all users for ${userId}`);
-          const allUsers = await api.getUsers({ limit: 1000 });
-          
-          if (allUsers.data && allUsers.data.length > 0) {
-            console.log(`📊 Found ${allUsers.data.length} total users in TimeDoctor`);
-            
-            // Look for exact match
-            const matchedUser = allUsers.data.find(user => user.id === userId);
-            
-            if (matchedUser && (matchedUser.name || matchedUser.email)) {
-              realUserName = matchedUser.name || matchedUser.email?.split('@')[0] || 'Name from user list';
-              realUserEmail = matchedUser.email || 'Email not available';
-              realUserTimezone = matchedUser.timezone || 'Unknown';
-              realUserRole = matchedUser.role || 'Unknown';
-              lookupMethod = 'user_list_search';
-              
-              console.log(`✅ Strategy 2 SUCCESS: Found in user list: ${realUserName} (${realUserEmail})`);
-            } else {
-              console.log(`⚠️ Strategy 2: User ${userId} found but no name/email, trying enhanced computer name lookup`);
-              
-              // STRATEGY 3: Use enhanced computer name lookup
-              try {
-                const enhancedDeviceInfo = await api.getEnhancedDeviceInfo(userId);
-                
-                if (enhancedDeviceInfo.realNameFound && enhancedDeviceInfo.realComputerName) {
-                  // Extract user name from computer name if possible
-                  let extractedName = enhancedDeviceInfo.realComputerName;
-                  
-                  // Try to extract a user name from computer names like "Johns-MacBook-Pro.local"
-                  const nameMatch = extractedName.match(/^([A-Za-z]+)[s']?[-\s]/);
-                  if (nameMatch) {
-                    extractedName = nameMatch[1];
-                  }
-                  
-                  realUserName = extractedName;
-                  realUserEmail = `${extractedName.toLowerCase().replace(/[^a-z0-9]/g, '')}@company.com`;
-                  lookupMethod = 'enhanced_computer_name';
-                  
-                  console.log(`✅ Strategy 3: Extracted from REAL computer name: ${realUserName} from ${enhancedDeviceInfo.realComputerName}`);
-                } else {
-                  // Fall back to pattern-based device name
-                  const deviceName = userData.userInfo?.name || userData.deviceName || 'Unknown Device';
-                  
-                  // Enhanced device name extraction for patterns like "Computer-TthUmwrm"
-                  if (deviceName && deviceName !== 'Unknown Device') {
-                    // Try to extract name from device patterns
-                    let nameMatch = deviceName.match(/(?:Computer-|DESKTOP-|PC-)([A-Za-z]+)/i);
-                    
-                    // ENHANCED: Also try to extract from alphanumeric patterns like "Computer-TthUmwrm"
-                    if (!nameMatch) {
-                      nameMatch = deviceName.match(/(?:Computer-|DESKTOP-|PC-)([A-Za-z0-9]+)/i);
-                    }
-                    
-                    if (nameMatch) {
-                      let extractedName = nameMatch[1];
-                      
-                      // Clean up the extracted name
-                      if (extractedName.length >= 3) {
-                        // For "TthUmwrm" -> "Tthumwrm"
-                        realUserName = extractedName.charAt(0).toUpperCase() + extractedName.slice(1).toLowerCase();
-                        realUserEmail = `${extractedName.toLowerCase()}@company.com`;
-                        lookupMethod = 'device_name_extraction';
-                        console.log(`✅ Strategy 3b: Extracted from device name: ${realUserName} from ${deviceName}`);
-                      } else {
-                        // Name too short, use full device name
-                        realUserName = `User of ${deviceName}`;
-                        realUserEmail = `user.${deviceName.replace(/[^a-zA-Z0-9]/g, '').toLowerCase()}@company.com`;
-                        lookupMethod = 'device_name_fallback';
-                        console.log(`✅ Strategy 3b: Using device name: ${realUserName}`);
-                      }
-                    } else {
-                      realUserName = `User of ${deviceName}`;
-                      realUserEmail = `user.${deviceName.replace(/[^a-zA-Z0-9]/g, '').toLowerCase()}@company.com`;
-                      lookupMethod = 'device_name_fallback';
-                      console.log(`✅ Strategy 3b: Using full device name: ${realUserName}`);
-                    }
-                  } else {
-                    // STRATEGY 4: Use userId as identifier
-                    realUserName = `User ${userId.substring(0, 8)}`;
-                    realUserEmail = `user.${userId.substring(0, 8)}@company.com`;
-                    lookupMethod = 'userid_fallback';
-                    console.log(`✅ Strategy 4: Using userId fallback: ${realUserName}`);
-                  }
-                }
-              } catch (enhancedError) {
-                console.error(`⚠️ Enhanced computer name lookup failed: ${enhancedError.message}`);
-                // Fall back to previous logic
-                const deviceName = userData.userInfo?.name || userData.deviceName || 'Unknown Device';
-                realUserName = `User of ${deviceName}`;
-                realUserEmail = `user@company.com`;
-                lookupMethod = 'final_fallback';
-              }
-            }
-          } else {
-            throw new Error('No users found in TimeDoctor account');
-          }
-          
-        } catch (userListError) {
-          console.error(`⚠️ Strategy 2 failed: ${userListError.message}`);
-          lookupError = `Direct lookup failed: ${directLookupError.message}, User list failed: ${userListError.message}`;
-          
-          // FINAL FALLBACK: Create identifiable name from available data
-          const deviceName = userData.userInfo?.name || userData.deviceName || 'Unknown Device';
-          
-          // Still try device name extraction as final attempt
-          if (deviceName.includes('TthUmwrm')) {
-            realUserName = 'Tthumwrm';
-            realUserEmail = 'tthumwrm@company.com';
-            lookupMethod = 'final_device_extraction';
-            console.log(`⚠️ Final fallback - extracted from device: ${realUserName}`);
-          } else {
-            realUserName = `User of ${deviceName}`;
-            realUserEmail = `monitoring.user@company.com`;
-            lookupMethod = 'final_fallback';
-            console.log(`⚠️ Using final fallback: ${realUserName}`);
-          }
-        }
+      } catch (lookupErrorException) {
+        console.error(`❌ Username lookup failed: ${lookupErrorException.message}`);
+        lookupError = lookupErrorException.message;
+        deviceOwner = `User ${userId.substring(0, 8)}`;
+        realUserName = deviceOwner;
+        lookupMethod = 'final_fallback';
       }
     }
 
     const n8nPayload = {
-      // 🎯 REAL USER NAME AT ROOT LEVEL (ALWAYS HAS A VALUE NOW)
+      // 👤 PRIMARY: WHO OWNS THIS LAPTOP/COMPUTER (REAL USERNAME FROM TIMEKEEPER)
       name: realUserName,
       realEmail: realUserEmail,
+      deviceOwner: deviceOwner,
+      whoOwnsThisDevice: deviceOwner,
+      laptopOwner: deviceOwner,
+      computerOwner: deviceOwner,
       
       timestamp: new Date().toISOString(),
       source: 'timekeeper-workspace-services',
       type: 'user_monitoring',
       user: {
         userId: userData.userId,
+        
+        // 👤 DEVICE OWNERSHIP INFORMATION (PRIMARY FOCUS)
+        deviceOwner: deviceOwner,
+        whoOwnsThisDevice: deviceOwner,
+        realUsername: realUserName,
+        
+        // Original device name (secondary)
         deviceName: userData.userInfo?.name || 'Unknown Device',
         email: userData.userInfo?.email || 'Unknown',
         
-        // 🎯 ENHANCED USER DATA
+        // 🎯 ENHANCED USER DATA WITH USERNAME PRIORITY
         realName: realUserName,
         realEmail: realUserEmail,
         realTimezone: realUserTimezone,
         realRole: realUserRole,
         
-        // 🔍 DEBUGGING INFO
+        // 🔍 LOOKUP INFORMATION
         lookupMethod: lookupMethod,
         lookupError: lookupError,
-        lookupSuccess: lookupMethod !== 'none',
+        lookupSuccess: lookupMethod !== 'none' && !lookupError,
+        confidence: confidence,
         
         timezone: userData.userInfo?.timezone || 'Unknown',
         lastSeen: userData.userInfo?.lastSeenGlobal,
         deviceInfo: {
           ...userData.userInfo?.deviceInfo || {},
+          
+          // PRIMARY: Device ownership
+          deviceOwner: deviceOwner,
+          whoOwnsThisDevice: deviceOwner,
+          
           enrichedWithRealData: true,
           enrichedAt: new Date().toISOString()
         }
@@ -684,17 +653,15 @@ async function sendUserDataToN8N(userData) {
         totalDisconnections: userData.disconnectionEvents?.totalEvents || 0,
         totalTimeUsageRecords: userData.timeUsage?.totalRecords || 0,
         
-        // 🎯 EMPLOYEE MONITORING DATA FOR IDENTIFICATION
+        // 👤 EMPLOYEE IDENTIFICATION FOR MONITORING (USERNAME PRIORITY)
         employeeIdentification: {
           identifiedName: realUserName,
           identifiedEmail: realUserEmail,
+          deviceOwner: deviceOwner,
+          whoOwnsThisDevice: deviceOwner,
           identificationMethod: lookupMethod,
-          confidenceLevel: lookupMethod === 'direct_lookup' ? 'high' : 
-                           lookupMethod === 'user_list_search' ? 'high' :
-                           lookupMethod === 'enhanced_computer_name' ? 'high' :
-                           lookupMethod === 'device_name_extraction' ? 'medium' :
-                           lookupMethod === 'device_name_fallback' ? 'low' : 'very_low',
-          monitoringReliable: lookupMethod !== 'final_fallback'
+          confidenceLevel: confidence,
+          monitoringReliable: confidence !== 'very_low'
         }
       },
       activities: userData.activitySummary?.data || [],
@@ -705,7 +672,7 @@ async function sendUserDataToN8N(userData) {
       overallStats: userData.overallStats?.data || null
     };
 
-    console.log(`📤 Sending enhanced monitoring data for: ${realUserName} (Method: ${lookupMethod})`);
+    console.log(`📤 Sending monitoring data for device owner: "${deviceOwner}" (Method: ${lookupMethod})`);
     console.log(`🔗 Using webhook URL: ${N8N_WEBHOOK_URL}`);
     
     const response = await fetch(N8N_WEBHOOK_URL, {
@@ -722,7 +689,7 @@ async function sendUserDataToN8N(userData) {
     console.log(`📡 Response status: ${response.status} ${response.statusText}`);
 
     if (response.ok) {
-      console.log(`✅ Successfully sent enhanced data to n8n for: ${realUserName} (${userId})`);
+      console.log(`✅ Successfully sent data to n8n for device owner: "${deviceOwner}" (${userId})`);
       return true;
     } else {
       const errorText = await response.text().catch(() => 'Unable to read response');
@@ -730,20 +697,20 @@ async function sendUserDataToN8N(userData) {
       return false;
     }
   } catch (error) {
-    console.error(`❌ Error sending enhanced data to n8n for user ${userData.userId}:`, error.message);
+    console.error(`❌ Error sending data to n8n for user ${userData.userId}:`, error.message);
     return false;
   }
 }
 
 /**
- * Collect all user monitoring data and send to n8n (each user separately)
+ * Collect all user monitoring data and send to n8n (each user separately) WITH USERNAME PRIORITY
  */
 async function syncAllUsersToN8N() {
   try {
-    console.log('\n🔄 Starting automated n8n sync for all users...');
+    console.log('\n🔄 Starting automated n8n sync with USERNAME priority...');
     console.log(`🔗 n8n Webhook URL: ${N8N_WEBHOOK_URL}`);
     
-    // Get monitoring data for all users WITH ENHANCED COMPUTER NAME LOOKUP
+    // Get monitoring data for all users WITH USERNAME IDENTIFICATION
     const allMonitoringData = await api.getAllUsersMonitoring({
       from: new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString().split('T')[0], // Last 24 hours
       to: new Date().toISOString().split('T')[0]
@@ -754,13 +721,13 @@ async function syncAllUsersToN8N() {
       return;
     }
 
-    console.log(`📊 Found ${allMonitoringData.data.length} users to sync to n8n`);
-    console.log(`🖥️ REAL computer names found: ${allMonitoringData.summary.realComputerNamesFound || 0}`);
+    console.log(`📊 Found ${allMonitoringData.data.length} device owners to sync to n8n`);
+    console.log(`👤 USERNAMES identified: ${allMonitoringData.summary.usernamesIdentified || 0}`);
     
     let successCount = 0;
     let errorCount = 0;
 
-    // Send each user's data separately to n8n
+    // Send each user's data separately to n8n with USERNAME priority
     for (const userData of allMonitoringData.data) {
       // Add a small delay between requests to avoid overwhelming n8n
       await new Promise(resolve => setTimeout(resolve, 500));
@@ -773,7 +740,7 @@ async function syncAllUsersToN8N() {
       }
     }
 
-    console.log(`✅ n8n sync completed: ${successCount} users successful, ${errorCount} errors`);
+    console.log(`✅ n8n sync completed: ${successCount} device owners successful, ${errorCount} errors`);
     
   } catch (error) {
     console.error('❌ Error during n8n sync:', error.message);
@@ -807,26 +774,25 @@ setTimeout(() => {
 app.get('/api/health', (req, res) => {
   res.json({
     status: 'ok',
-    message: 'TimeDoctor API Server with ENHANCED Real Computer Name Detection is running',
+    message: 'TimeDoctor API Server with USERNAME Priority Detection is running',
     timestamp: new Date().toISOString(),
     enhancedFeatures: {
-      realComputerNameDetection: true,
+      usernamePriorityDetection: true,
       examples: [
-        '"Macbooks-MacBook-Air.local" → Real hostname found!',
-        '"DESKTOP-ABC123" → Real Windows computer name',
-        '"Johns-iMac.local" → Real Apple device name'
+        '"Dev Team" → Real TimeDoctor username found!',
+        '"John Smith" → Actual employee name',
+        '"Alice Johnson" → Real user identification'
       ],
       lookupStrategies: [
-        '1. Direct TimeDoctor user details lookup',
-        '2. Activity records device lookup',
-        '3. Screenshot metadata device lookup',
-        '4. Worklog records device lookup', 
-        '5. Session/connection info lookup'
+        '1. Direct TimeDoctor user lookup',
+        '2. Company user list search',
+        '3. Activity data username lookup'
       ],
       newEndpoints: [
-        'GET /api/getRealComputerName/:userId',
-        'GET /api/getAllRealComputerNames'
-      ]
+        'GET /api/getUserName/:userId',
+        'GET /api/getAllUserNames'
+      ],
+      focusOn: 'WHO OWNS THE LAPTOP/COMPUTER (not device names)'
     }
   });
 });
@@ -887,14 +853,14 @@ app.use((req, res) => {
     success: false,
     error: 'Endpoint not found',
     availableEndpoints: [
-      'GET /api/health - Server health with enhanced capabilities',
+      'GET /api/health - Server health with USERNAME priority',
       'GET /api/auth/status - Authentication status', 
       'GET /api/getUsers - All TimeDoctor users',
-      'GET /api/getRealComputerName/:userId - Get REAL computer name for user',
-      'GET /api/getAllRealComputerNames - Get REAL computer names for ALL users',
-      'GET /api/n8n/lookupUser/:userId - Single user lookup',
-      'GET /api/debug/userLookup/:userId - Debug user lookup issues',
-      'GET /api/debug/allUsersWithDetails - All users with monitoring details'
+      'GET /api/getUserName/:userId - Get USERNAME (device owner)',
+      'GET /api/getAllUserNames - Get USERNAMES for ALL users (device owners)',
+      'GET /api/n8n/lookupUser/:userId - Single user lookup with USERNAME',
+      'GET /api/debug/userLookup/:userId - Debug user lookup with USERNAME focus',
+      'GET /api/debug/allUsersWithDetails - All users with USERNAME details'
     ]
   });
 });
@@ -912,30 +878,31 @@ app.use((err, req, res, next) => {
 // ==================== START SERVER ====================
 
 app.listen(PORT, () => {
-  console.log('\n🚀 TimeDoctor API Server with ENHANCED REAL Computer Name Detection');
-  console.log('=====================================================================');
+  console.log('\n🚀 TimeDoctor API Server with USERNAME PRIORITY Detection');
+  console.log('============================================================');
   console.log(`📡 Server running on: http://localhost:${PORT}`);
   console.log(`📧 Email: ${config.credentials.email}`);
   console.log(`🏢 Company: ${config.credentials.companyName}`);
-  console.log('\n🎯 ENHANCED REAL COMPUTER NAME DETECTION:');
-  console.log('==========================================');
-  console.log('✅ "Macbooks-MacBook-Air.local" → REAL hostname detected!');
-  console.log('✅ "DESKTOP-ABC123" → Real Windows computer name');
-  console.log('✅ "Johns-iMac.local" → Real Apple device name');
-  console.log('✅ "Computer-TthUmwrm" → Falls back to pattern extraction');
-  console.log('\n🔍 TEST ENDPOINTS FOR REAL COMPUTER NAMES:');
-  console.log('===========================================');
-  console.log('🖥️ GET  /api/getRealComputerName/aLfYIu7-TthUmwrm');
-  console.log('🖥️ GET  /api/getAllRealComputerNames');
+  console.log('\n👤 USERNAME PRIORITY DETECTION:');
+  console.log('===============================');
+  console.log('✅ "Dev Team" → Real TimeDoctor username (device owner)');
+  console.log('✅ "John Smith" → Actual employee name');
+  console.log('✅ "Alice Johnson" → Real user identification');
+  console.log('✅ WHO OWNS THE LAPTOP/COMPUTER (not random device names)');
+  console.log('\n🔍 TEST ENDPOINTS FOR USERNAMES:');
+  console.log('=================================');
+  console.log('👤 GET  /api/getUserName/aLfYIu7-TthUmwrm');
+  console.log('👤 GET  /api/getAllUserNames');
   console.log('\n🔧 DEBUG ENDPOINTS:');
   console.log('==================');
   console.log('🔧 GET  /api/debug/userLookup/aLfYIu7-TthUmwrm');
   console.log('🔧 GET  /api/debug/allUsersWithDetails');
-  console.log('\n🎉 NOW DETECTS REAL COMPUTER NAMES FROM TIMEKEEPER!');
-  console.log('===================================================');
-  console.log('✅ Your system will find "Macbooks-MacBook-Air.local" instead of "Computer-TthUmwrm"');
-  console.log('✅ Real hostnames, device names, and computer identification');
-  console.log('\n🔥 Data will start flowing to n8n in 30 seconds with REAL computer names!');
+  console.log('\n🎉 NOW IDENTIFIES WHO OWNS EACH LAPTOP/COMPUTER!');
+  console.log('================================================');
+  console.log('✅ Your system will show "Dev Team" instead of "Computer-TthUmwrm"');
+  console.log('✅ Real employee names from TimeDoctor usernames');
+  console.log('✅ Know exactly who owns each device');
+  console.log('\n🔥 Data will start flowing to n8n in 30 seconds with REAL USERNAMES!');
 });
 
 module.exports = app;
