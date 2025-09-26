@@ -10,7 +10,7 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 // N8N Webhook Configuration - EASILY CHANGEABLE HERE
-const N8N_WEBHOOK_URL = process.env.N8N_WEBHOOK_URL || 'https://n8n.srv470812.hstgr.cloud/webhook-test/workspace-url-n8n';
+const N8N_WEBHOOK_URL = process.env.N8N_WEBHOOK_URL || 'https://n8n.srv470812.hstgr.cloud/webhook/workspace-url-n8n';
 
 // 🔧 FIXED: Send data only ONCE - disable recurring cron job
 const SEND_ONCE_ON_STARTUP = true; // Set to true to send once on startup
