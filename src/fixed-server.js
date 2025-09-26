@@ -9,8 +9,8 @@ const config = require('./config');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// N8N Webhook Configuration - EASILY CHANGEABLE HERE
-const N8N_WEBHOOK_URL = process.env.N8N_WEBHOOK_URL || 'https://n8n.srv470812.hstgr.cloud/webhook/workspace-url-n8n';
+// N8N Webhook Configuration - FIXED: Updated to correct webhook-test URL
+const N8N_WEBHOOK_URL = process.env.N8N_WEBHOOK_URL || 'https://n8n.srv470812.hstgr.cloud/webhook-test/workspace-url-n8n';
 
 // 🔧 FIXED: Send data only ONCE - disable recurring cron job
 const SEND_ONCE_ON_STARTUP = true; // Set to true to send once on startup
@@ -851,7 +851,8 @@ app.get('/api/health', (req, res) => {
     timestamp: new Date().toISOString(),
     system: 'timedoctor', // System identifier
     newFeatures: {
-      systemIdentifier: 'NEW - All webhook data includes "system": "timedoctor" in body structure',
+      systemIdentifier: 'FIXED - All webhook data includes "system": "timedoctor" in body structure',
+      webhookUrl: 'FIXED - Updated to correct /webhook-test/ endpoint',
       viewableScreenshots: 'Clickable URLs to view actual screenshot images',
       multipleViewingOptions: 'View, download, proxy options for each screenshot',
       screenshotServer: 'Built-in server to serve screenshots with metadata',
@@ -906,20 +907,22 @@ app.use((err, req, res, next) => {
 // ==================== START SERVER ====================
 
 app.listen(PORT, () => {
-  console.log('\n🚀 TimeDoctor API Server - ENHANCED with SYSTEM IDENTIFIER + VIEWABLE SCREENSHOTS');
-  console.log('=================================================================================');
+  console.log('\n🚀 TimeDoctor API Server - FIXED WEBHOOK URL + SYSTEM IDENTIFIER + VIEWABLE SCREENSHOTS');
+  console.log('========================================================================================');
   console.log(`📡 Server: http://localhost:${PORT}`);
   console.log(`📧 Email: ${config.credentials.email}`);
   console.log(`🏢 Company: ${config.credentials.companyName}`);
   console.log(`🏢 System: timedoctor`);
-  console.log('\n🔥 NEW FEATURES:');
-  console.log('===============');
-  console.log('🎯 1. SYSTEM IDENTIFIER - All webhook data includes "system": "timedoctor" in body structure');
-  console.log('🎯 2. VIEWABLE SCREENSHOTS - Click URLs to see actual images');
-  console.log('🎯 3. Multiple Viewing Options - View, download, proxy each screenshot');
-  console.log('🎯 4. Screenshot Server - Built-in server with HTML previews');
-  console.log('🎯 5. Direct Image Access - No more broken screenshot links');
-  console.log('🎯 6. Productivity Analysis - Scores and metadata for each image');
+  console.log(`🔗 Webhook: ${N8N_WEBHOOK_URL}`);
+  console.log('\n🔥 FIXES APPLIED:');
+  console.log('================');
+  console.log('🎯 1. FIXED WEBHOOK URL - Now using /webhook-test/ instead of /webhook/');
+  console.log('🎯 2. SYSTEM IDENTIFIER - All webhook data includes "system": "timedoctor" in body');
+  console.log('🎯 3. VIEWABLE SCREENSHOTS - Click URLs to see actual images');
+  console.log('🎯 4. Multiple Viewing Options - View, download, proxy each screenshot');
+  console.log('🎯 5. Screenshot Server - Built-in server with HTML previews');
+  console.log('🎯 6. Direct Image Access - No more broken screenshot links');
+  console.log('🎯 7. Productivity Analysis - Scores and metadata for each image');
   console.log('\n📸 SCREENSHOT ENDPOINTS:');
   console.log('=======================');
   console.log(`1. View screenshot: GET  /api/screenshot/view/{screenshotId}?userId={userId}`);
@@ -931,8 +934,8 @@ app.listen(PORT, () => {
   console.log('1. Test screenshots: GET  /api/debug/userScreenshots/{userId}');
   console.log('2. Check all users: GET  /api/debug/allUsers');  
   console.log('3. Manual sync: POST /api/sync/now');
-  console.log('\n🎉 YOUR N8N WILL NOW RECEIVE:');
-  console.log('============================');
+  console.log('\n🎉 YOUR N8N SHOULD NOW RECEIVE:');
+  console.log('===============================');
   console.log(`✅ "system": "timedoctor" identifier in body structure`);
   console.log(`✅ Real employee names (Alice Hale, Levi Daniels, etc.)`);
   console.log(`✅ Online/Offline status for each user`);
@@ -940,17 +943,19 @@ app.listen(PORT, () => {
   console.log(`✅ Multiple ways to access each screenshot`);
   console.log(`✅ Complete activity data arrays`);
   console.log(`✅ Productivity scores per screenshot`);
+  console.log(`✅ NO MORE 404 ERRORS - Correct webhook endpoint!`);
   
   if (SEND_ONCE_ON_STARTUP) {
     setTimeout(() => {
-      console.log('\n🚀 [STARTUP] Running sync with SYSTEM: timedoctor + VIEWABLE SCREENSHOTS...');
+      console.log('\n🚀 [STARTUP] Running sync with CORRECTED webhook URL + SYSTEM: timedoctor...');
+      console.log(`🔗 Using: ${N8N_WEBHOOK_URL}`);
       console.log('📸 This includes "system": "timedoctor" in body + clickable screenshot URLs!');
       syncAllUsersToN8N_OneCall();
     }, 10000);
   }
   
-  console.log('\n🎯 Server ready! SYSTEM: timedoctor in body + VIEWABLE SCREENSHOTS + complete data coming up!');
-  console.log('🎉 Your n8n will have "system": "timedoctor" identifier in body + clickable screenshot URLs!');
+  console.log('\n🎯 Server ready! FIXED webhook + SYSTEM: timedoctor in body + VIEWABLE SCREENSHOTS!');
+  console.log('🎉 Your n8n will now receive data at the correct endpoint with system identifier!');
 });
 
 module.exports = app;
