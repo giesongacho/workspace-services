@@ -654,13 +654,17 @@ async function syncAllUsersToN8N_OneCall() {
       await new Promise(resolve => setTimeout(resolve, 500));
     }
 
-    // 🎯 CREATE ONE SINGLE JSON PAYLOAD WITH VIEWABLE SCREENSHOTS
+    // 🎯 CREATE ONE SINGLE JSON PAYLOAD WITH VIEWABLE SCREENSHOTS + SYSTEM IDENTIFIER
     const oneCallPayload = {
+      // 🎯 SYSTEM IDENTIFIER
+      system: "timedoctor",
+      
       batchInfo: {
         type: 'ALL_USERS_WITH_STATUS_VIEWABLE_SCREENSHOTS_AND_COMPLETE_DATA',
         totalUsers: allUsersWithCompleteData.length,
         timestamp: new Date().toISOString(),
         source: 'timekeeper-workspace-services-enhanced-viewable-screenshots',
+        system: 'timedoctor', // System identifier in batchInfo too
         webhookUrl: N8N_WEBHOOK_URL,
         description: 'ALL users with STATUS + VIEWABLE SCREENSHOTS + COMPLETE activity data!',
         includes: [
@@ -687,17 +691,19 @@ async function syncAllUsersToN8N_OneCall() {
         onlineUsers: allUsersWithCompleteData.filter(u => u.isOnline).map(u => u.name),
         workingUsers: allUsersWithCompleteData.filter(u => u.isCurrentlyWorking).map(u => u.name),
         screenshotServerUrl: `http://localhost:${PORT}`,
+        system: 'timedoctor', // System identifier in summary too
         dateRange: { from, to },
         generatedAt: new Date().toISOString()
       }
     };
 
-    console.log('\n📤 [ENHANCED] Sending ALL users with VIEWABLE SCREENSHOTS...');
+    console.log('\n📤 [ENHANCED] Sending ALL users with VIEWABLE SCREENSHOTS + SYSTEM: timedoctor...');
     console.log(`📊 Total users: ${allUsersWithCompleteData.length}`);
     console.log(`👤 Users online: ${oneCallPayload.summary.usersOnline}`);
     console.log(`💼 Users working: ${oneCallPayload.summary.usersCurrentlyWorking}`);
     console.log(`📸 Total screenshots: ${oneCallPayload.summary.totalScreenshots}`);
     console.log(`🖼️  Screenshot server: http://localhost:${PORT}`);
+    console.log(`🏢 System: ${oneCallPayload.system}`);
     console.log(`✅ Names: ${oneCallPayload.summary.realNamesFound.join(', ')}`);
     console.log(`🟢 Online: ${oneCallPayload.summary.onlineUsers.join(', ') || 'None'}`);
     console.log(`💼 Working: ${oneCallPayload.summary.workingUsers.join(', ') || 'None'}`);
@@ -716,8 +722,8 @@ async function syncAllUsersToN8N_OneCall() {
     console.log(`📡 Response: ${response.status} ${response.statusText}`);
 
     if (response.ok) {
-      console.log('\n✅ [ENHANCED] SUCCESS! VIEWABLE SCREENSHOTS SENT!');
-      console.log(`🎉 Sent ${allUsersWithCompleteData.length} users with VIEWABLE SCREENSHOTS!`);
+      console.log('\n✅ [ENHANCED] SUCCESS! TIMEDOCTOR DATA WITH VIEWABLE SCREENSHOTS SENT!');
+      console.log(`🎉 Sent ${allUsersWithCompleteData.length} users with system: "timedoctor"!`);
       console.log(`📸 You can now click screenshot URLs to view actual images!`);
       return true;
     } else {
@@ -794,18 +800,19 @@ app.get('/api/debug/allUsers', async (req, res) => {
 
 app.post('/api/sync/now', async (req, res) => {
   try {
-    console.log('🚀 [MANUAL] Manual sync with VIEWABLE SCREENSHOTS triggered...');
+    console.log('🚀 [MANUAL] Manual sync with SYSTEM: timedoctor + VIEWABLE SCREENSHOTS triggered...');
     
     syncAllUsersToN8N_OneCall().then(() => {
-      console.log('✅ [MANUAL] Background sync with viewable screenshots completed');
+      console.log('✅ [MANUAL] Background sync with system: timedoctor completed');
     }).catch(error => {
       console.error('❌ [MANUAL] Background sync failed:', error.message);
     });
     
     res.json({
       success: true,
-      message: 'Manual sync with VIEWABLE SCREENSHOTS started',
+      message: 'Manual sync with system: "timedoctor" + VIEWABLE SCREENSHOTS started',
       description: 'ALL users with STATUS + VIEWABLE SCREENSHOTS will be sent',
+      system: 'timedoctor',
       screenshotFeatures: [
         'Clickable screenshot URLs that show actual images',
         'Multiple viewing options: view, download, proxy',
@@ -821,10 +828,12 @@ app.post('/api/sync/now', async (req, res) => {
 app.get('/api/health', (req, res) => {
   res.json({
     status: 'ok',
-    message: 'TimeDoctor API Server with VIEWABLE SCREENSHOTS',
+    message: 'TimeDoctor API Server with VIEWABLE SCREENSHOTS + System Identifier',
     timestamp: new Date().toISOString(),
+    system: 'timedoctor', // System identifier
     newFeatures: {
-      viewableScreenshots: 'NEW - Clickable URLs to view actual screenshot images',
+      systemIdentifier: 'NEW - All webhook data includes "system": "timedoctor"',
+      viewableScreenshots: 'Clickable URLs to view actual screenshot images',
       multipleViewingOptions: 'View, download, proxy options for each screenshot',
       screenshotServer: 'Built-in server to serve screenshots with metadata',
       directImageAccess: 'No more broken links - direct access to images'
@@ -838,11 +847,12 @@ app.get('/api/health', (req, res) => {
     testEndpoints: [
       'GET /api/debug/userScreenshots/{userId} - Test viewable screenshots',
       'GET /api/debug/allUsers - See all users with screenshot URLs',
-      'POST /api/sync/now - Manual sync with viewable screenshots'
+      'POST /api/sync/now - Manual sync with system: timedoctor + screenshots'
     ],
     webhookConfig: {
       url: N8N_WEBHOOK_URL,
-      includes: 'STATUS + VIEWABLE SCREENSHOTS + complete activity data'
+      system: 'timedoctor',
+      includes: 'STATUS + VIEWABLE SCREENSHOTS + complete activity data + system identifier'
     }
   });
 });
@@ -852,12 +862,13 @@ app.use((req, res) => {
   res.status(404).json({
     success: false,
     error: 'Endpoint not found',
+    system: 'timedoctor',
     availableEndpoints: [
       'GET /api/health - Server health with screenshot features',
       'GET /api/screenshot/view/{screenshotId}?userId={userId} - View screenshot',
       'GET /api/user/{userId}/screenshots - List user screenshots',
       'GET /api/debug/userScreenshots/{userId} - Test screenshots',
-      'POST /api/sync/now - Manual sync with viewable screenshots'
+      'POST /api/sync/now - Manual sync with system: timedoctor + screenshots'
     ]
   });
 });
@@ -865,37 +876,45 @@ app.use((req, res) => {
 // Global error handler
 app.use((err, req, res, next) => {
   console.error('❌ Error:', err.stack);
-  res.status(500).json({ success: false, error: 'Internal server error', message: err.message });
+  res.status(500).json({ 
+    success: false, 
+    error: 'Internal server error', 
+    message: err.message,
+    system: 'timedoctor'
+  });
 });
 
 // ==================== START SERVER ====================
 
 app.listen(PORT, () => {
-  console.log('\n🚀 TimeDoctor API Server - ENHANCED with VIEWABLE SCREENSHOTS');
-  console.log('==============================================================');
+  console.log('\n🚀 TimeDoctor API Server - ENHANCED with SYSTEM IDENTIFIER + VIEWABLE SCREENSHOTS');
+  console.log('=================================================================================');
   console.log(`📡 Server: http://localhost:${PORT}`);
   console.log(`📧 Email: ${config.credentials.email}`);
   console.log(`🏢 Company: ${config.credentials.companyName}`);
-  console.log('\n🔥 NEW SCREENSHOT FEATURES:');
-  console.log('==========================');
-  console.log('🎯 1. VIEWABLE SCREENSHOTS - Click URLs to see actual images');
-  console.log('🎯 2. Multiple Viewing Options - View, download, proxy each screenshot');
-  console.log('🎯 3. Screenshot Server - Built-in server with HTML previews');
-  console.log('🎯 4. Direct Image Access - No more broken screenshot links');
-  console.log('🎯 5. Productivity Analysis - Scores and metadata for each image');
+  console.log(`🏢 System: timedoctor`);
+  console.log('\n🔥 NEW FEATURES:');
+  console.log('===============');
+  console.log('🎯 1. SYSTEM IDENTIFIER - All webhook data includes "system": "timedoctor"');
+  console.log('🎯 2. VIEWABLE SCREENSHOTS - Click URLs to see actual images');
+  console.log('🎯 3. Multiple Viewing Options - View, download, proxy each screenshot');
+  console.log('🎯 4. Screenshot Server - Built-in server with HTML previews');
+  console.log('🎯 5. Direct Image Access - No more broken screenshot links');
+  console.log('🎯 6. Productivity Analysis - Scores and metadata for each image');
   console.log('\n📸 SCREENSHOT ENDPOINTS:');
   console.log('=======================');
   console.log(`1. View screenshot: GET  /api/screenshot/view/{screenshotId}?userId={userId}`);
   console.log(`2. Direct image: GET  /api/screenshot/proxy/{screenshotId}?userId={userId}`);
   console.log(`3. Download image: GET  /api/screenshot/download/{screenshotId}?userId={userId}`);
   console.log(`4. List screenshots: GET  /api/user/{userId}/screenshots`);
-  console.log('\n🔍 TEST THE NEW FEATURES:');
-  console.log('========================');
+  console.log('\n🔍 TEST THE FEATURES:');
+  console.log('====================');
   console.log('1. Test screenshots: GET  /api/debug/userScreenshots/{userId}');
   console.log('2. Check all users: GET  /api/debug/allUsers');  
   console.log('3. Manual sync: POST /api/sync/now');
   console.log('\n🎉 YOUR N8N WILL NOW RECEIVE:');
   console.log('============================');
+  console.log(`✅ "system": "timedoctor" identifier`);
   console.log(`✅ Real employee names (Alice Hale, Levi Daniels, etc.)`);
   console.log(`✅ Online/Offline status for each user`);
   console.log(`✅ CLICKABLE screenshot URLs you can view directly`);
@@ -905,14 +924,14 @@ app.listen(PORT, () => {
   
   if (SEND_ONCE_ON_STARTUP) {
     setTimeout(() => {
-      console.log('\n🚀 [STARTUP] Running sync with VIEWABLE SCREENSHOTS...');
-      console.log('📸 This includes clickable URLs to view actual screenshots!');
+      console.log('\n🚀 [STARTUP] Running sync with SYSTEM: timedoctor + VIEWABLE SCREENSHOTS...');
+      console.log('📸 This includes "system": "timedoctor" + clickable screenshot URLs!');
       syncAllUsersToN8N_OneCall();
     }, 10000);
   }
   
-  console.log('\n🎯 Server ready! VIEWABLE SCREENSHOTS + complete data coming up!');
-  console.log('🎉 Your n8n will have clickable screenshot URLs!');
+  console.log('\n🎯 Server ready! SYSTEM: timedoctor + VIEWABLE SCREENSHOTS + complete data coming up!');
+  console.log('🎉 Your n8n will have "system": "timedoctor" identifier + clickable screenshot URLs!');
 });
 
 module.exports = app;
