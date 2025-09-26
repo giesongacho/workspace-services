@@ -6,7 +6,7 @@
   "scripts": {
     "start": "node src/server.js",
     "dev": "node --watch src/server.js",
-    "test-api": "node src/index.js",
+    "test-api": "node src/fixed-server.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [
