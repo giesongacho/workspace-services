@@ -13,7 +13,7 @@ console.log('   4. NO individual webhook calls (no more spam!)');
 console.log('   5. Clean, beautiful JSON structure');
 console.log('\n🔗 WEBHOOK URL:');
 console.log('===============');
-console.log('https://n8n.srv470812.hstgr.cloud/webhook-test/workspace-url-n8n');
+console.log('https://n8n.srv470812.hstgr.cloud/webhook/workspace-url-n8n');
 console.log('\n🎯 Result: ONE clean n8n execution with ALL users inside!');
 console.log('🎉 No more ugly individual webhook calls!');
 
