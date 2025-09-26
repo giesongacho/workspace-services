@@ -656,57 +656,76 @@ async function syncAllUsersToN8N_OneCall() {
 
     // 🎯 CREATE ONE SINGLE JSON PAYLOAD WITH VIEWABLE SCREENSHOTS + SYSTEM IDENTIFIER
     const oneCallPayload = {
-      // 🎯 SYSTEM IDENTIFIER
-      system: "timedoctor",
-      
-      batchInfo: {
-        type: 'ALL_USERS_WITH_STATUS_VIEWABLE_SCREENSHOTS_AND_COMPLETE_DATA',
-        totalUsers: allUsersWithCompleteData.length,
-        timestamp: new Date().toISOString(),
-        source: 'timekeeper-workspace-services-enhanced-viewable-screenshots',
-        system: 'timedoctor', // System identifier in batchInfo too
-        webhookUrl: N8N_WEBHOOK_URL,
-        description: 'ALL users with STATUS + VIEWABLE SCREENSHOTS + COMPLETE activity data!',
-        includes: [
-          'FIXED real usernames like "Levi Daniels", "Joshua Banks"',
-          'ONLINE/OFFLINE status and working status for each user',
-          'VIEWABLE screenshot URLs that you can click and see the images',
-          'Multiple screenshot viewing options (view, download, proxy)',
-          'Complete activities, timeUsage, disconnections arrays',
-          'Productivity stats and overall statistics'
-        ],
-        dateRange: { from, to }
+      headers: {
+        "host": "n8n.srv470812.hstgr.cloud",
+        "user-agent": "Workspace-Services-Fixed-Enhanced-One-Call/1.0",
+        "content-length": "2532021",
+        "accept": "*/*",
+        "accept-encoding": "gzip,deflate",
+        "content-type": "application/json",
+        "x-forwarded-for": "124.217.31.66",
+        "x-forwarded-host": "n8n.srv470812.hstgr.cloud",
+        "x-forwarded-port": "443",
+        "x-forwarded-proto": "https",
+        "x-forwarded-server": "3c5fbe68e13d",
+        "x-real-ip": "124.217.31.66"
       },
-      
-      // 👥 ALL USERS WITH VIEWABLE SCREENSHOTS & COMPLETE DATA
-      allUsers: allUsersWithCompleteData,
-      
-      // 📈 ENHANCED SUMMARY
-      summary: {
-        totalUsers: allUsersWithCompleteData.length,
-        usersOnline: allUsersWithCompleteData.filter(u => u.isOnline).length,
-        usersCurrentlyWorking: allUsersWithCompleteData.filter(u => u.isCurrentlyWorking).length,
-        totalScreenshots: allUsersWithCompleteData.reduce((sum, u) => sum + u.totalScreenshots, 0),
-        realNamesFound: allUsersWithCompleteData.map(u => u.name),
-        onlineUsers: allUsersWithCompleteData.filter(u => u.isOnline).map(u => u.name),
-        workingUsers: allUsersWithCompleteData.filter(u => u.isCurrentlyWorking).map(u => u.name),
-        screenshotServerUrl: `http://localhost:${PORT}`,
-        system: 'timedoctor', // System identifier in summary too
-        dateRange: { from, to },
-        generatedAt: new Date().toISOString()
+      params: {},
+      query: {},
+      body: {
+        // 🎯 SYSTEM IDENTIFIER IN BODY
+        system: "timedoctor",
+        
+        batchInfo: {
+          type: 'ALL_USERS_WITH_FIXED_USERNAMES_AND_COMPLETE_ACTIVITY_DATA_IN_ONE_CALL',
+          totalUsers: allUsersWithCompleteData.length,
+          timestamp: new Date().toISOString(),
+          source: 'timekeeper-workspace-services-fixed-enhanced',
+          webhookUrl: N8N_WEBHOOK_URL,
+          description: 'ALL users with FIXED USERNAMES + COMPLETE activity data in ONE webhook call!',
+          includes: [
+            'FIXED real usernames like "Levi Daniels", "Joshua Banks"',
+            'Complete activities array with detailed records',
+            'Screenshots array with scores and categories',
+            'TimeUsage array with app/website usage patterns',
+            'Disconnections array with idle time data',
+            'Productivity stats and overall statistics'
+          ],
+          // 🎯 ENHANCED: Multiple ways to view the screenshot
+          system: "timedoctor",
+          dateRange: { from, to }
+        },
+        
+        // 👥 ALL USERS WITH VIEWABLE SCREENSHOTS & COMPLETE DATA
+        allUsers: allUsersWithCompleteData,
+        
+        // 📈 ENHANCED SUMMARY
+        summary: {
+          totalUsers: allUsersWithCompleteData.length,
+          usersOnline: allUsersWithCompleteData.filter(u => u.isOnline).length,
+          usersCurrentlyWorking: allUsersWithCompleteData.filter(u => u.isCurrentlyWorking).length,
+          totalScreenshots: allUsersWithCompleteData.reduce((sum, u) => sum + u.totalScreenshots, 0),
+          realNamesFound: allUsersWithCompleteData.map(u => u.name),
+          onlineUsers: allUsersWithCompleteData.filter(u => u.isOnline).map(u => u.name),
+          workingUsers: allUsersWithCompleteData.filter(u => u.isCurrentlyWorking).map(u => u.name),
+          screenshotServerUrl: `http://localhost:${PORT}`,
+          system: 'timedoctor', // System identifier in summary too
+          dateRange: { from, to },
+          generatedAt: new Date().toISOString()
+        }
       }
     };
 
     console.log('\n📤 [ENHANCED] Sending ALL users with VIEWABLE SCREENSHOTS + SYSTEM: timedoctor...');
     console.log(`📊 Total users: ${allUsersWithCompleteData.length}`);
-    console.log(`👤 Users online: ${oneCallPayload.summary.usersOnline}`);
-    console.log(`💼 Users working: ${oneCallPayload.summary.usersCurrentlyWorking}`);
-    console.log(`📸 Total screenshots: ${oneCallPayload.summary.totalScreenshots}`);
+    console.log(`👤 Users online: ${oneCallPayload.body.summary.usersOnline}`);
+    console.log(`💼 Users working: ${oneCallPayload.body.summary.usersCurrentlyWorking}`);
+    console.log(`📸 Total screenshots: ${oneCallPayload.body.summary.totalScreenshots}`);
     console.log(`🖼️  Screenshot server: http://localhost:${PORT}`);
-    console.log(`🏢 System: ${oneCallPayload.system}`);
-    console.log(`✅ Names: ${oneCallPayload.summary.realNamesFound.join(', ')}`);
-    console.log(`🟢 Online: ${oneCallPayload.summary.onlineUsers.join(', ') || 'None'}`);
-    console.log(`💼 Working: ${oneCallPayload.summary.workingUsers.join(', ') || 'None'}`);
+    console.log(`🏢 System: ${oneCallPayload.body.system}`);
+    console.log(`✅ Names: ${oneCallPayload.body.summary.realNamesFound.join(', ')}`);
+    console.log(`🟢 Online: ${oneCallPayload.body.summary.onlineUsers.join(', ') || 'None'}`);
+    console.log(`💼 Working: ${oneCallPayload.body.summary.workingUsers.join(', ') || 'None'}`);
     
     // 🚀 SEND ONE SINGLE ENHANCED WEBHOOK CALL
     const response = await fetch(N8N_WEBHOOK_URL, {
@@ -723,7 +742,7 @@ async function syncAllUsersToN8N_OneCall() {
 
     if (response.ok) {
       console.log('\n✅ [ENHANCED] SUCCESS! TIMEDOCTOR DATA WITH VIEWABLE SCREENSHOTS SENT!');
-      console.log(`🎉 Sent ${allUsersWithCompleteData.length} users with system: "timedoctor"!`);
+      console.log(`🎉 Sent ${allUsersWithCompleteData.length} users with system: "timedoctor" in body!`);
       console.log(`📸 You can now click screenshot URLs to view actual images!`);
       return true;
     } else {
@@ -832,7 +851,7 @@ app.get('/api/health', (req, res) => {
     timestamp: new Date().toISOString(),
     system: 'timedoctor', // System identifier
     newFeatures: {
-      systemIdentifier: 'NEW - All webhook data includes "system": "timedoctor"',
+      systemIdentifier: 'NEW - All webhook data includes "system": "timedoctor" in body structure',
       viewableScreenshots: 'Clickable URLs to view actual screenshot images',
       multipleViewingOptions: 'View, download, proxy options for each screenshot',
       screenshotServer: 'Built-in server to serve screenshots with metadata',
@@ -852,7 +871,7 @@ app.get('/api/health', (req, res) => {
     webhookConfig: {
       url: N8N_WEBHOOK_URL,
       system: 'timedoctor',
-      includes: 'STATUS + VIEWABLE SCREENSHOTS + complete activity data + system identifier'
+      includes: 'STATUS + VIEWABLE SCREENSHOTS + complete activity data + system identifier in body'
     }
   });
 });
@@ -895,7 +914,7 @@ app.listen(PORT, () => {
   console.log(`🏢 System: timedoctor`);
   console.log('\n🔥 NEW FEATURES:');
   console.log('===============');
-  console.log('🎯 1. SYSTEM IDENTIFIER - All webhook data includes "system": "timedoctor"');
+  console.log('🎯 1. SYSTEM IDENTIFIER - All webhook data includes "system": "timedoctor" in body structure');
   console.log('🎯 2. VIEWABLE SCREENSHOTS - Click URLs to see actual images');
   console.log('🎯 3. Multiple Viewing Options - View, download, proxy each screenshot');
   console.log('🎯 4. Screenshot Server - Built-in server with HTML previews');
@@ -914,7 +933,7 @@ app.listen(PORT, () => {
   console.log('3. Manual sync: POST /api/sync/now');
   console.log('\n🎉 YOUR N8N WILL NOW RECEIVE:');
   console.log('============================');
-  console.log(`✅ "system": "timedoctor" identifier`);
+  console.log(`✅ "system": "timedoctor" identifier in body structure`);
   console.log(`✅ Real employee names (Alice Hale, Levi Daniels, etc.)`);
   console.log(`✅ Online/Offline status for each user`);
   console.log(`✅ CLICKABLE screenshot URLs you can view directly`);
@@ -925,13 +944,13 @@ app.listen(PORT, () => {
   if (SEND_ONCE_ON_STARTUP) {
     setTimeout(() => {
       console.log('\n🚀 [STARTUP] Running sync with SYSTEM: timedoctor + VIEWABLE SCREENSHOTS...');
-      console.log('📸 This includes "system": "timedoctor" + clickable screenshot URLs!');
+      console.log('📸 This includes "system": "timedoctor" in body + clickable screenshot URLs!');
       syncAllUsersToN8N_OneCall();
     }, 10000);
   }
   
-  console.log('\n🎯 Server ready! SYSTEM: timedoctor + VIEWABLE SCREENSHOTS + complete data coming up!');
-  console.log('🎉 Your n8n will have "system": "timedoctor" identifier + clickable screenshot URLs!');
+  console.log('\n🎯 Server ready! SYSTEM: timedoctor in body + VIEWABLE SCREENSHOTS + complete data coming up!');
+  console.log('🎉 Your n8n will have "system": "timedoctor" identifier in body + clickable screenshot URLs!');
 });
 
 module.exports = app;
