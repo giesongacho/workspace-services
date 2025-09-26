@@ -120,11 +120,11 @@ async function getEnhancedUserStatus(userId) {
 }
 
 /**
- * 🎯 GET INDIVIDUAL USER SCREENSHOTS WITH DETAILS
+ * 🎯 GET ENHANCED SCREENSHOTS WITH VIEWABLE URLS
  */
 async function getEnhancedUserScreenshots(userId, dateFrom, dateTo) {
   try {
-    console.log(`📸 [SCREENSHOTS] Getting enhanced screenshots for user: ${userId}`);
+    console.log(`📸 [SCREENSHOTS] Getting enhanced screenshots with URLs for user: ${userId}`);
     
     // Get screenshots for the user
     const screenshotsResult = await api.getScreenshots({
@@ -147,31 +147,45 @@ async function getEnhancedUserScreenshots(userId, dateFrom, dateTo) {
     const screenshots = screenshotsResult.data;
     console.log(`📸 [SCREENSHOTS] Found ${screenshots.length} screenshots for ${userId}`);
     
-    // Process screenshots with enhanced details
-    const enhancedScreenshots = screenshots.map(screenshot => ({
-      id: screenshot.id,
-      userId: screenshot.userId || userId,
-      timestamp: screenshot.timestamp || screenshot.start,
-      score: screenshot.score || 0,
-      category: screenshot.category,
-      title: screenshot.title || 'Unknown Activity',
-      url: screenshot.url,
-      thumbnailUrl: screenshot.thumbnailUrl,
+    // Process screenshots with enhanced details and viewable URLs
+    const enhancedScreenshots = screenshots.map(screenshot => {
+      const screenshotId = screenshot.id;
+      const timestamp = screenshot.timestamp || screenshot.start;
       
-      // Enhanced fields
-      productivityScore: screenshot.score || 0,
-      isProductive: (screenshot.score || 0) >= 5, // 5+ is productive
-      timeOfDay: screenshot.timestamp ? 
-        new Date(screenshot.timestamp).toLocaleTimeString() : 'Unknown',
-      dayOfWeek: screenshot.timestamp ? 
-        new Date(screenshot.timestamp).toLocaleDateString('en-US', { weekday: 'long' }) : 'Unknown',
-      
-      // Screenshot metadata
-      width: screenshot.width,
-      height: screenshot.height,
-      fileSize: screenshot.fileSize,
-      device: screenshot.device || 'Unknown Device'
-    }));
+      return {
+        id: screenshotId,
+        userId: screenshot.userId || userId,
+        timestamp: timestamp,
+        score: screenshot.score || 0,
+        category: screenshot.category,
+        title: screenshot.title || screenshot.windowTitle || 'Unknown Activity',
+        
+        // 🎯 ENHANCED: Multiple ways to view the screenshot
+        originalUrl: screenshot.url, // Original TimeDoctor URL
+        thumbnailUrl: screenshot.thumbnailUrl, // Thumbnail URL
+        viewableUrl: `http://localhost:${PORT}/api/screenshot/view/${screenshotId}?userId=${userId}`, // Direct view through our server
+        downloadUrl: `http://localhost:${PORT}/api/screenshot/download/${screenshotId}?userId=${userId}`, // Download link
+        proxyUrl: `http://localhost:${PORT}/api/screenshot/proxy/${screenshotId}?userId=${userId}`, // Proxy URL for CORS issues
+        
+        // Enhanced fields
+        productivityScore: screenshot.score || 0,
+        isProductive: (screenshot.score || 0) >= 5, // 5+ is productive
+        timeOfDay: timestamp ? new Date(timestamp).toLocaleTimeString() : 'Unknown',
+        dayOfWeek: timestamp ? new Date(timestamp).toLocaleDateString('en-US', { weekday: 'long' }) : 'Unknown',
+        
+        // Screenshot metadata
+        width: screenshot.width,
+        height: screenshot.height,
+        fileSize: screenshot.fileSize,
+        device: screenshot.device || screenshot.deviceName || 'Unknown Device',
+        
+        // Additional data
+        windowTitle: screenshot.windowTitle,
+        applicationName: screenshot.applicationName,
+        websiteUrl: screenshot.websiteUrl,
+        activityType: screenshot.activityType || 'unknown'
+      };
+    });
     
     // Calculate productivity metrics
     const totalScore = enhancedScreenshots.reduce((sum, s) => sum + (s.productivityScore || 0), 0);
@@ -202,10 +216,19 @@ async function getEnhancedUserScreenshots(userId, dateFrom, dateTo) {
       eveningScreenshots: enhancedScreenshots.filter(s => {
         const hour = s.timestamp ? new Date(s.timestamp).getHours() : 0;
         return hour >= 18 || hour < 6;
-      }).length
+      }).length,
+      
+      // 🎯 ENHANCED: Quick access URLs
+      latestScreenshotUrl: enhancedScreenshots.length > 0 ? 
+        enhancedScreenshots[enhancedScreenshots.length - 1].viewableUrl : null,
+      bestProductiveScreenshot: enhancedScreenshots
+        .filter(s => s.isProductive)
+        .sort((a, b) => (b.productivityScore || 0) - (a.productivityScore || 0))[0]?.viewableUrl || null
     };
     
     console.log(`✅ [SCREENSHOTS] Enhanced ${userId}: ${screenshotSummary.totalCount} screenshots, avg score: ${screenshotSummary.averageScore}`);
+    console.log(`📸 [SCREENSHOTS] Latest screenshot URL: ${screenshotSummary.latestScreenshotUrl}`);
+    
     return screenshotSummary;
     
   } catch (error) {
@@ -219,6 +242,224 @@ async function getEnhancedUserScreenshots(userId, dateFrom, dateTo) {
     };
   }
 }
+
+// ==================== SCREENSHOT VIEWING ENDPOINTS ====================
+
+/**
+ * 🎯 VIEW SCREENSHOT DIRECTLY - Returns HTML page with the screenshot
+ */
+app.get('/api/screenshot/view/:screenshotId', async (req, res) => {
+  try {
+    const { screenshotId } = req.params;
+    const { userId } = req.query;
+    
+    console.log(`📸 [VIEW] Viewing screenshot ${screenshotId} for user ${userId}`);
+    
+    // Get screenshot details
+    const screenshotDetails = await api.getScreenshot(screenshotId);
+    
+    if (!screenshotDetails.success || !screenshotDetails.data) {
+      return res.status(404).send(`
+        <html><body>
+          <h1>Screenshot Not Found</h1>
+          <p>Screenshot ID: ${screenshotId}</p>
+          <p>User ID: ${userId}</p>
+        </body></html>
+      `);
+    }
+    
+    const screenshot = screenshotDetails.data;
+    const screenshotUrl = screenshot.url || screenshot.thumbnailUrl;
+    
+    if (!screenshotUrl) {
+      return res.status(404).send(`
+        <html><body>
+          <h1>Screenshot URL Not Available</h1>
+          <p>Screenshot ID: ${screenshotId}</p>
+        </body></html>
+      `);
+    }
+    
+    // Return HTML page with the screenshot
+    res.send(`
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <title>Screenshot - ${screenshot.title || 'Unknown'}</title>
+        <style>
+          body { font-family: Arial, sans-serif; margin: 20px; }
+          .screenshot-container { text-align: center; }
+          .screenshot { max-width: 100%; border: 1px solid #ddd; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
+          .metadata { background: #f5f5f5; padding: 15px; margin: 20px 0; border-radius: 5px; }
+          .score { font-size: 24px; font-weight: bold; color: ${(screenshot.score || 0) >= 5 ? 'green' : 'orange'}; }
+        </style>
+      </head>
+      <body>
+        <div class="screenshot-container">
+          <h1>📸 Screenshot Preview</h1>
+          <img src="${screenshotUrl}" alt="Screenshot" class="screenshot" />
+          
+          <div class="metadata">
+            <h3>Screenshot Details</h3>
+            <p><strong>Title:</strong> ${screenshot.title || screenshot.windowTitle || 'Unknown'}</p>
+            <p><strong>Productivity Score:</strong> <span class="score">${screenshot.score || 0}/10</span></p>
+            <p><strong>Timestamp:</strong> ${screenshot.timestamp ? new Date(screenshot.timestamp).toLocaleString() : 'Unknown'}</p>
+            <p><strong>User ID:</strong> ${userId}</p>
+            <p><strong>Application:</strong> ${screenshot.applicationName || 'Unknown'}</p>
+            <p><strong>Website:</strong> ${screenshot.websiteUrl || 'N/A'}</p>
+            <p><strong>Device:</strong> ${screenshot.device || screenshot.deviceName || 'Unknown'}</p>
+          </div>
+          
+          <div>
+            <a href="${screenshotUrl}" target="_blank">🔗 Open Original</a> | 
+            <a href="/api/screenshot/download/${screenshotId}?userId=${userId}">💾 Download</a> |
+            <a href="/api/screenshot/proxy/${screenshotId}?userId=${userId}">🖼️ Direct Image</a>
+          </div>
+        </div>
+      </body>
+      </html>
+    `);
+    
+  } catch (error) {
+    console.error(`❌ [VIEW] Error viewing screenshot:`, error.message);
+    res.status(500).send(`
+      <html><body>
+        <h1>Error Loading Screenshot</h1>
+        <p>Error: ${error.message}</p>
+      </body></html>
+    `);
+  }
+});
+
+/**
+ * 🎯 PROXY SCREENSHOT - Returns the image directly (for CORS issues)
+ */
+app.get('/api/screenshot/proxy/:screenshotId', async (req, res) => {
+  try {
+    const { screenshotId } = req.params;
+    const { userId } = req.query;
+    
+    console.log(`📸 [PROXY] Proxying screenshot ${screenshotId} for user ${userId}`);
+    
+    // Get screenshot details
+    const screenshotDetails = await api.getScreenshot(screenshotId);
+    
+    if (!screenshotDetails.success || !screenshotDetails.data) {
+      return res.status(404).json({ error: 'Screenshot not found' });
+    }
+    
+    const screenshot = screenshotDetails.data;
+    const screenshotUrl = screenshot.url || screenshot.thumbnailUrl;
+    
+    if (!screenshotUrl) {
+      return res.status(404).json({ error: 'Screenshot URL not available' });
+    }
+    
+    // Fetch the image and proxy it
+    const imageResponse = await fetch(screenshotUrl, {
+      headers: {
+        'User-Agent': 'Workspace-Services-Screenshot-Proxy/1.0'
+      }
+    });
+    
+    if (!imageResponse.ok) {
+      console.error(`❌ [PROXY] Failed to fetch screenshot: ${imageResponse.status}`);
+      return res.status(404).json({ error: 'Failed to fetch screenshot image' });
+    }
+    
+    // Set appropriate headers
+    res.setHeader('Content-Type', imageResponse.headers.get('content-type') || 'image/jpeg');
+    res.setHeader('Cache-Control', 'public, max-age=3600'); // Cache for 1 hour
+    
+    // Stream the image
+    imageResponse.body.pipe(res);
+    
+  } catch (error) {
+    console.error(`❌ [PROXY] Error proxying screenshot:`, error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * 🎯 DOWNLOAD SCREENSHOT - Forces download
+ */
+app.get('/api/screenshot/download/:screenshotId', async (req, res) => {
+  try {
+    const { screenshotId } = req.params;
+    const { userId } = req.query;
+    
+    console.log(`📸 [DOWNLOAD] Downloading screenshot ${screenshotId} for user ${userId}`);
+    
+    // Get screenshot details
+    const screenshotDetails = await api.getScreenshot(screenshotId);
+    
+    if (!screenshotDetails.success || !screenshotDetails.data) {
+      return res.status(404).json({ error: 'Screenshot not found' });
+    }
+    
+    const screenshot = screenshotDetails.data;
+    const screenshotUrl = screenshot.url || screenshot.thumbnailUrl;
+    
+    if (!screenshotUrl) {
+      return res.status(404).json({ error: 'Screenshot URL not available' });
+    }
+    
+    // Fetch the image
+    const imageResponse = await fetch(screenshotUrl);
+    
+    if (!imageResponse.ok) {
+      console.error(`❌ [DOWNLOAD] Failed to fetch screenshot: ${imageResponse.status}`);
+      return res.status(404).json({ error: 'Failed to fetch screenshot image' });
+    }
+    
+    // Generate filename
+    const timestamp = screenshot.timestamp ? new Date(screenshot.timestamp).toISOString().replace(/[:.]/g, '-') : 'unknown';
+    const filename = `screenshot-${userId}-${timestamp}.jpg`;
+    
+    // Set download headers
+    res.setHeader('Content-Type', 'application/octet-stream');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    
+    // Stream the image
+    imageResponse.body.pipe(res);
+    
+  } catch (error) {
+    console.error(`❌ [DOWNLOAD] Error downloading screenshot:`, error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * 🎯 LIST USER SCREENSHOTS - JSON API
+ */
+app.get('/api/user/:userId/screenshots', async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const from = req.query.from || new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+    const to = req.query.to || new Date().toISOString().split('T')[0];
+    
+    console.log(`📸 [LIST] Getting screenshots list for user ${userId}`);
+    
+    const enhancedScreenshots = await getEnhancedUserScreenshots(userId, from, to);
+    
+    res.json({
+      success: true,
+      userId: userId,
+      dateRange: { from, to },
+      screenshots: enhancedScreenshots,
+      quickLinks: {
+        latestScreenshot: enhancedScreenshots.latestScreenshotUrl,
+        bestProductiveScreenshot: enhancedScreenshots.bestProductiveScreenshot
+      }
+    });
+    
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
 
 // ==================== FIXED USERNAME IDENTIFICATION ====================
 
@@ -296,14 +537,14 @@ async function getFixedUserLookup(userId) {
   }
 }
 
-// ==================== ENHANCED: ALL USERS IN ONE WEBHOOK CALL WITH STATUS & SCREENSHOTS ====================
+// ==================== ENHANCED: ALL USERS IN ONE WEBHOOK CALL WITH VIEWABLE SCREENSHOTS ====================
 
 /**
- * 🎯 ENHANCED: Collect all user monitoring data with STATUS & SCREENSHOTS and send ALL USERS IN ONE WEBHOOK CALL
+ * 🎯 ENHANCED: Collect all user monitoring data with STATUS & VIEWABLE SCREENSHOTS
  */
 async function syncAllUsersToN8N_OneCall() {
   try {
-    console.log('\n🚀 [ENHANCED] Starting ONE-CALL sync with STATUS + SCREENSHOTS + FIXED USERNAMES...');
+    console.log('\n🚀 [ENHANCED] Starting ONE-CALL sync with STATUS + VIEWABLE SCREENSHOTS...');
     console.log(`🔗 n8n Webhook: ${N8N_WEBHOOK_URL}`);
     
     // Get date range (last 24 hours)
@@ -322,7 +563,7 @@ async function syncAllUsersToN8N_OneCall() {
 
     console.log(`📊 [ENHANCED] Found ${allMonitoringData.data.length} users to process for ONE webhook call`);
     
-    // 🔥 PROCESS ALL USERS WITH STATUS, SCREENSHOTS, & COMPLETE ACTIVITY DATA
+    // 🔥 PROCESS ALL USERS WITH STATUS, VIEWABLE SCREENSHOTS, & COMPLETE ACTIVITY DATA
     const allUsersWithCompleteData = [];
     
     for (const userData of allMonitoringData.data) {
@@ -334,7 +575,7 @@ async function syncAllUsersToN8N_OneCall() {
       // 🎯 ENHANCED STATUS - Get online/offline and working status
       const enhancedStatus = await getEnhancedUserStatus(userData.userId);
       
-      // 🎯 ENHANCED SCREENSHOTS - Get individual screenshots with details
+      // 🎯 ENHANCED SCREENSHOTS WITH VIEWABLE URLS
       const enhancedScreenshots = await getEnhancedUserScreenshots(userData.userId, from, to);
       
       const enhancedUserData = {
@@ -374,7 +615,7 @@ async function syncAllUsersToN8N_OneCall() {
         timeUsage: userData.timeUsage?.data || [],
         disconnections: userData.disconnectionEvents?.data || [],
         
-        // 🎯 ENHANCED SCREENSHOTS WITH DETAILS
+        // 🎯 ENHANCED SCREENSHOTS WITH VIEWABLE URLS
         screenshots: enhancedScreenshots.screenshots || [],
         screenshotSummary: {
           totalCount: enhancedScreenshots.totalCount,
@@ -384,7 +625,12 @@ async function syncAllUsersToN8N_OneCall() {
           unproductiveCount: enhancedScreenshots.unproductiveCount,
           morningScreenshots: enhancedScreenshots.morningScreenshots,
           afternoonScreenshots: enhancedScreenshots.afternoonScreenshots,
-          eveningScreenshots: enhancedScreenshots.eveningScreenshots
+          eveningScreenshots: enhancedScreenshots.eveningScreenshots,
+          
+          // 🎯 QUICK ACCESS URLs
+          latestScreenshotUrl: enhancedScreenshots.latestScreenshotUrl,
+          bestProductiveScreenshotUrl: enhancedScreenshots.bestProductiveScreenshot,
+          allScreenshotsUrl: `http://localhost:${PORT}/api/user/${userData.userId}/screenshots`
         },
         
         // 📈 PRODUCTIVITY & STATS DATA  
@@ -392,183 +638,97 @@ async function syncAllUsersToN8N_OneCall() {
         overallStats: userData.overallStats?.data || null,
         
         // 📅 DATE RANGE
-        dateRange: { from, to },
-        
-        // 🔍 USER INFO & LOOKUP DETAILS
-        user: {
-          userId: userData.userId,
-          
-          // 🎯 FIXED: Real names from TimeDoctor (like dashboard shows)
-          deviceOwner: userLookup.username,
-          whoOwnsThisDevice: userLookup.username,
-          realName: userLookup.username,
-          realUsername: userLookup.username,
-          realEmail: userLookup.email,
-          realTimezone: userLookup.timezone,
-          realRole: userLookup.role,
-          
-          // 🎯 ENHANCED STATUS
-          onlineStatus: enhancedStatus.onlineStatus,
-          workingStatus: enhancedStatus.workingStatus,
-          isCurrentlyWorking: enhancedStatus.isCurrentlyWorking,
-          lastSeen: enhancedStatus.lastSeen,
-          statusDetails: enhancedStatus.statusDetails,
-          
-          // Original device name (for reference)
-          deviceName: userData.userInfo?.name || 'Unknown Device',
-          email: userData.userInfo?.email || 'Unknown',
-          
-          // 🔍 LOOKUP SUCCESS INFORMATION
-          lookupMethod: userLookup.method,
-          lookupError: userLookup.error || null,
-          lookupSuccess: userLookup.success,
-          confidence: userLookup.confidence,
-          
-          timezone: userData.userInfo?.timezone || 'Unknown',
-          lastSeen: userData.userInfo?.lastSeenGlobal,
-          deviceInfo: {
-            ...userData.userInfo?.deviceInfo || {},
-            deviceOwner: userLookup.username,
-            whoOwnsThisDevice: userLookup.username,
-            enrichedWithRealData: true,
-            enrichedAt: new Date().toISOString()
-          }
-        },
-        
-        // 👤 EMPLOYEE IDENTIFICATION (FIXED TO SHOW REAL NAMES)
-        monitoring: {
-          dateRange: userData.dateRange,
-          hasData: userData.summary?.hasData || false,
-          totalActivities: userData.activitySummary?.totalRecords || 0,
-          totalScreenshots: enhancedScreenshots.totalCount || 0,
-          totalDisconnections: userData.disconnectionEvents?.totalEvents || 0,
-          totalTimeUsageRecords: userData.timeUsage?.totalRecords || 0,
-          
-          // 🎯 ENHANCED STATUS MONITORING
-          currentStatus: {
-            online: enhancedStatus.onlineStatus,
-            working: enhancedStatus.workingStatus,
-            isActive: enhancedStatus.isCurrentlyWorking,
-            lastActivity: enhancedStatus.lastActivity
-          },
-          
-          employeeIdentification: {
-            identifiedName: userLookup.username,
-            identifiedEmail: userLookup.email,
-            deviceOwner: userLookup.username,
-            whoOwnsThisDevice: userLookup.username,
-            identificationMethod: userLookup.method,
-            confidenceLevel: userLookup.confidence,
-            monitoringReliable: userLookup.success
-          }
-        },
-        
-        // 🔍 DEBUG & MONITORING STATUS
-        monitoringStatus: {
-          activityStatus: userData.activitySummary?.status || 'no_data',
-          screenshotStatus: enhancedScreenshots.totalCount > 0 ? 'has_data' : 'no_data',
-          timeUsageStatus: userData.timeUsage?.status || 'no_data',
-          disconnectionStatus: userData.disconnectionEvents?.status || 'no_data',
-          overallStatus: enhancedStatus.onlineStatus
-        }
+        dateRange: { from, to }
       };
       
-      console.log(`✅ [ENHANCED] Added "${userLookup.username}" with STATUS + SCREENSHOTS`);
+      console.log(`✅ [ENHANCED] Added "${userLookup.username}" with VIEWABLE SCREENSHOTS`);
       console.log(`   👤 Status: ${enhancedStatus.onlineStatus} / ${enhancedStatus.workingStatus}`);
       console.log(`   📊 Activities: ${enhancedUserData.totalActivities}`);
-      console.log(`   📸 Screenshots: ${enhancedUserData.totalScreenshots} (avg score: ${enhancedScreenshots.averageScore})`);
+      console.log(`   📸 Screenshots: ${enhancedUserData.totalScreenshots} (latest: ${enhancedScreenshots.latestScreenshotUrl})`);
       console.log(`   ⏱️  Time Usage: ${enhancedUserData.totalTimeUsage}`);
       console.log(`   🔌 Disconnections: ${enhancedUserData.totalDisconnections}`);
       
       allUsersWithCompleteData.push(enhancedUserData);
       
       // Small delay between user processing
-      await new Promise(resolve => setTimeout(resolve, 500)); // Increased delay for API calls
+      await new Promise(resolve => setTimeout(resolve, 500));
     }
 
-    // 🎯 CREATE ONE SINGLE JSON PAYLOAD WITH STATUS, SCREENSHOTS & COMPLETE DATA
+    // 🎯 CREATE ONE SINGLE JSON PAYLOAD WITH VIEWABLE SCREENSHOTS
     const oneCallPayload = {
       batchInfo: {
-        type: 'ALL_USERS_WITH_STATUS_SCREENSHOTS_AND_COMPLETE_DATA_IN_ONE_CALL',
+        type: 'ALL_USERS_WITH_STATUS_VIEWABLE_SCREENSHOTS_AND_COMPLETE_DATA',
         totalUsers: allUsersWithCompleteData.length,
         timestamp: new Date().toISOString(),
-        source: 'timekeeper-workspace-services-enhanced-with-status-screenshots',
+        source: 'timekeeper-workspace-services-enhanced-viewable-screenshots',
         webhookUrl: N8N_WEBHOOK_URL,
-        description: 'ALL users with STATUS + SCREENSHOTS + COMPLETE activity data in ONE webhook call!',
+        description: 'ALL users with STATUS + VIEWABLE SCREENSHOTS + COMPLETE activity data!',
         includes: [
           'FIXED real usernames like "Levi Daniels", "Joshua Banks"',
           'ONLINE/OFFLINE status and working status for each user',
-          'Individual screenshots with productivity scores and details',
-          'Complete activities array with detailed records',
-          'TimeUsage array with app/website usage patterns',
-          'Disconnections array with idle time data',
+          'VIEWABLE screenshot URLs that you can click and see the images',
+          'Multiple screenshot viewing options (view, download, proxy)',
+          'Complete activities, timeUsage, disconnections arrays',
           'Productivity stats and overall statistics'
         ],
         dateRange: { from, to }
       },
       
-      // 👥 ALL USERS WITH STATUS, SCREENSHOTS & COMPLETE ACTIVITY DATA
+      // 👥 ALL USERS WITH VIEWABLE SCREENSHOTS & COMPLETE DATA
       allUsers: allUsersWithCompleteData,
       
       // 📈 ENHANCED SUMMARY
       summary: {
         totalUsers: allUsersWithCompleteData.length,
-        usersWithData: allUsersWithCompleteData.filter(u => u.hasData).length,
-        usersWithFixedNames: allUsersWithCompleteData.filter(u => u.lookupSuccess).length,
         usersOnline: allUsersWithCompleteData.filter(u => u.isOnline).length,
         usersCurrentlyWorking: allUsersWithCompleteData.filter(u => u.isCurrentlyWorking).length,
-        totalActivities: allUsersWithCompleteData.reduce((sum, u) => sum + u.totalActivities, 0),
         totalScreenshots: allUsersWithCompleteData.reduce((sum, u) => sum + u.totalScreenshots, 0),
-        totalTimeUsage: allUsersWithCompleteData.reduce((sum, u) => sum + u.totalTimeUsage, 0),
-        totalDisconnections: allUsersWithCompleteData.reduce((sum, u) => sum + u.totalDisconnections, 0),
         realNamesFound: allUsersWithCompleteData.map(u => u.name),
         onlineUsers: allUsersWithCompleteData.filter(u => u.isOnline).map(u => u.name),
         workingUsers: allUsersWithCompleteData.filter(u => u.isCurrentlyWorking).map(u => u.name),
+        screenshotServerUrl: `http://localhost:${PORT}`,
         dateRange: { from, to },
         generatedAt: new Date().toISOString()
       }
     };
 
-    console.log('\n📤 [ENHANCED] Sending ALL users with STATUS + SCREENSHOTS + COMPLETE DATA...');
+    console.log('\n📤 [ENHANCED] Sending ALL users with VIEWABLE SCREENSHOTS...');
     console.log(`📊 Total users: ${allUsersWithCompleteData.length}`);
     console.log(`👤 Users online: ${oneCallPayload.summary.usersOnline}`);
     console.log(`💼 Users working: ${oneCallPayload.summary.usersCurrentlyWorking}`);
-    console.log(`📊 Total activities: ${oneCallPayload.summary.totalActivities}`);
     console.log(`📸 Total screenshots: ${oneCallPayload.summary.totalScreenshots}`);
+    console.log(`🖼️  Screenshot server: http://localhost:${PORT}`);
     console.log(`✅ Names: ${oneCallPayload.summary.realNamesFound.join(', ')}`);
     console.log(`🟢 Online: ${oneCallPayload.summary.onlineUsers.join(', ') || 'None'}`);
     console.log(`💼 Working: ${oneCallPayload.summary.workingUsers.join(', ') || 'None'}`);
-    console.log(`🔗 Webhook: ${N8N_WEBHOOK_URL}`);
     
     // 🚀 SEND ONE SINGLE ENHANCED WEBHOOK CALL
     const response = await fetch(N8N_WEBHOOK_URL, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'User-Agent': 'Workspace-Services-Enhanced-Status-Screenshots/1.0'
+        'User-Agent': 'Workspace-Services-Enhanced-Viewable-Screenshots/1.0'
       },
       body: JSON.stringify(oneCallPayload),
-      timeout: 60000 // Increased timeout for larger payloads
+      timeout: 60000
     });
 
     console.log(`📡 Response: ${response.status} ${response.statusText}`);
 
     if (response.ok) {
-      console.log('\n✅ [ENHANCED] ONE CALL SUCCESS!');
-      console.log(`🎉 Sent ALL ${allUsersWithCompleteData.length} users with STATUS + SCREENSHOTS!`);
-      console.log(`👤 Online users: ${oneCallPayload.summary.usersOnline}`);
-      console.log(`💼 Working users: ${oneCallPayload.summary.usersCurrentlyWorking}`);
-      console.log(`📸 Total screenshots: ${oneCallPayload.summary.totalScreenshots} with productivity scores!`);
+      console.log('\n✅ [ENHANCED] SUCCESS! VIEWABLE SCREENSHOTS SENT!');
+      console.log(`🎉 Sent ${allUsersWithCompleteData.length} users with VIEWABLE SCREENSHOTS!`);
+      console.log(`📸 You can now click screenshot URLs to view actual images!`);
       return true;
     } else {
       const errorText = await response.text().catch(() => 'Unable to read response');
-      console.error(`❌ [ENHANCED] ONE CALL FAILED: ${response.status} ${response.statusText}`);
+      console.error(`❌ [ENHANCED] FAILED: ${response.status} ${response.statusText}`);
       console.error(`❌ Error: ${errorText}`);
       return false;
     }
     
   } catch (error) {
-    console.error(`❌ [ENHANCED] Error during enhanced one-call sync: ${error.message}`);
+    console.error(`❌ [ENHANCED] Error: ${error.message}`);
     console.error(error.stack);
     return false;
   }
@@ -576,247 +736,113 @@ async function syncAllUsersToN8N_OneCall() {
 
 // ==================== DEBUG ENDPOINTS ====================
 
-/**
- * @route   GET /api/debug/userStatus/:userId
- * @desc    DEBUG user online/offline status
- */
 app.get('/api/debug/userStatus/:userId', async (req, res) => {
   try {
     const userId = req.params.userId;
-    console.log(`🔍 [DEBUG] Testing user status for: ${userId}`);
-    
     const enhancedStatus = await getEnhancedUserStatus(userId);
-    
-    res.json({
-      success: true,
-      message: 'User status debug completed',
-      userId: userId,
-      status: enhancedStatus,
-      explanation: {
-        onlineStatus: enhancedStatus.onlineStatus === 'online' ? 
-          '✅ User is online (active within 15 minutes)' : 
-          '⚠️ User is offline (no activity in 15+ minutes)',
-        workingStatus: enhancedStatus.isCurrentlyWorking ? 
-          '💼 User is currently working' : 
-          '⏸️ User is not actively working',
-        lastSeen: enhancedStatus.lastSeen ? 
-          `Last seen: ${new Date(enhancedStatus.lastSeen).toLocaleString()}` : 
-          'No last seen data available'
-      }
-    });
-    
+    res.json({ success: true, userId, status: enhancedStatus });
   } catch (error) {
-    res.status(500).json({
-      success: false,
-      error: error.message,
-      userId: req.params.userId
-    });
+    res.status(500).json({ success: false, error: error.message });
   }
 });
 
-/**
- * @route   GET /api/debug/userScreenshots/:userId
- * @desc    DEBUG user screenshots
- */
 app.get('/api/debug/userScreenshots/:userId', async (req, res) => {
   try {
     const userId = req.params.userId;
     const from = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString().split('T')[0];
     const to = new Date().toISOString().split('T')[0];
     
-    console.log(`📸 [DEBUG] Testing user screenshots for: ${userId}`);
-    
     const enhancedScreenshots = await getEnhancedUserScreenshots(userId, from, to);
-    
-    res.json({
-      success: true,
-      message: 'User screenshots debug completed',
-      userId: userId,
-      screenshots: enhancedScreenshots,
-      summary: {
-        totalScreenshots: enhancedScreenshots.totalCount,
-        averageScore: enhancedScreenshots.averageScore,
-        productivityLevel: enhancedScreenshots.productivityLevel,
-        sampleScreenshots: enhancedScreenshots.screenshots.slice(0, 3)
-      }
-    });
-    
+    res.json({ success: true, userId, screenshots: enhancedScreenshots });
   } catch (error) {
-    res.status(500).json({
-      success: false,
-      error: error.message,
-      userId: req.params.userId
-    });
+    res.status(500).json({ success: false, error: error.message });
   }
 });
 
-/**
- * @route   GET /api/debug/fixedUserLookup/:userId
- * @desc    DEBUG the FIXED user lookup
- */
-app.get('/api/debug/fixedUserLookup/:userId', async (req, res) => {
-  try {
-    const userId = req.params.userId;
-    console.log(`🔍 [DEBUG] Testing FIXED user lookup for: ${userId}`);
-    
-    const result = await getFixedUserLookup(userId);
-    
-    res.json({
-      success: true,
-      message: 'FIXED user lookup debug completed',
-      userId: userId,
-      result: result,
-      explanation: {
-        whatHappened: result.success 
-          ? `✅ Found real username: "${result.username}"` 
-          : `❌ User not found, using fallback: "${result.username}"`,
-        method: result.method,
-        confidence: result.confidence,
-        nextSteps: result.success 
-          ? 'User will show with real name + status + screenshots in ONE webhook call to n8n'
-          : 'Check if userId exists in TimeDoctor or update user profile'
-      }
-    });
-    
-  } catch (error) {
-    res.status(500).json({
-      success: false,
-      error: error.message,
-      userId: req.params.userId
-    });
-  }
-});
-
-/**
- * @route   GET /api/debug/allUsers
- * @desc    See all users with status preview
- */
 app.get('/api/debug/allUsers', async (req, res) => {
   try {
-    console.log('📊 [DEBUG] Fetching all TimeDoctor users with status preview...');
-    
     const allUsers = await api.getUsers({ limit: 1000, detail: 'extended' });
-    
     if (!allUsers.data) {
-      return res.json({
-        success: false,
-        message: 'No users found',
-        data: []
-      });
+      return res.json({ success: false, message: 'No users found', data: [] });
     }
     
     const userList = allUsers.data.map(user => ({
       userId: user.id,
       name: user.name || 'NO NAME',
-      displayName: user.displayName || 'NO DISPLAY NAME', 
-      username: user.username || 'NO USERNAME',
-      fullName: user.fullName || 'NO FULL NAME',
       email: user.email || 'NO EMAIL',
-      role: user.role || 'NO ROLE',
       status: user.status || 'NO STATUS',
-      lastSeen: user.lastSeenGlobal || user.lastSeen || 'Never',
-      
-      // Show what name will be used in webhook
-      finalName: user.name || 
-               user.displayName || 
-               user.fullName || 
-               user.username ||
-               `${user.firstName || ''} ${user.lastName || ''}`.trim() ||
-               user.email?.split('@')[0] ||
-               'Unknown User'
+      screenshotsUrl: `http://localhost:${PORT}/api/user/${user.id}/screenshots`
     }));
-    
-    console.log(`✅ [DEBUG] Found ${userList.length} users in TimeDoctor`);
     
     res.json({
       success: true,
-      message: `Found ${userList.length} users - will get STATUS + SCREENSHOTS for each in ONE webhook call`,
+      message: `Found ${userList.length} users - each will have viewable screenshot URLs`,
       totalUsers: userList.length,
       data: userList,
       testEndpoints: [
-        'GET /api/debug/userStatus/{userId} - Test status detection',
-        'GET /api/debug/userScreenshots/{userId} - Test screenshot analysis',
-        'GET /api/debug/fixedUserLookup/{userId} - Test name lookup'
+        'GET /api/debug/userScreenshots/{userId} - Test viewable screenshots',
+        'GET /api/user/{userId}/screenshots - List all screenshots with URLs',
+        'GET /api/screenshot/view/{screenshotId}?userId={userId} - View screenshot'
       ]
     });
-    
   } catch (error) {
-    res.status(500).json({
-      success: false,
-      error: error.message
-    });
+    res.status(500).json({ success: false, error: error.message });
   }
 });
 
-// ==================== MANUAL SYNC ENDPOINTS ====================
+// ==================== MANUAL SYNC & HEALTH ENDPOINTS ====================
 
-/**
- * @route   POST /api/sync/now
- * @desc    Manually trigger enhanced ONE CALL sync with status + screenshots
- */
 app.post('/api/sync/now', async (req, res) => {
   try {
-    console.log('🚀 [MANUAL] Manual ENHANCED ONE CALL sync with STATUS + SCREENSHOTS triggered...');
+    console.log('🚀 [MANUAL] Manual sync with VIEWABLE SCREENSHOTS triggered...');
     
-    // Run ONE CALL sync in background
     syncAllUsersToN8N_OneCall().then(() => {
-      console.log('✅ [MANUAL] Background ENHANCED ONE CALL sync completed');
+      console.log('✅ [MANUAL] Background sync with viewable screenshots completed');
     }).catch(error => {
-      console.error('❌ [MANUAL] Background ENHANCED ONE CALL sync failed:', error.message);
+      console.error('❌ [MANUAL] Background sync failed:', error.message);
     });
     
     res.json({
       success: true,
-      message: 'Manual ENHANCED ONE CALL sync started in background',
-      description: 'ALL users with STATUS + SCREENSHOTS + COMPLETE activity data will be sent in ONE webhook call',
-      status: 'ENHANCED sync is running, check console for progress',
-      enhancement: 'Includes online/offline status and individual screenshots for each user!'
+      message: 'Manual sync with VIEWABLE SCREENSHOTS started',
+      description: 'ALL users with STATUS + VIEWABLE SCREENSHOTS will be sent',
+      screenshotFeatures: [
+        'Clickable screenshot URLs that show actual images',
+        'Multiple viewing options: view, download, proxy',
+        'Direct HTML preview with metadata',
+        'Productivity scores and timing analysis'
+      ]
     });
-    
   } catch (error) {
-    res.status(500).json({
-      success: false,
-      error: error.message
-    });
+    res.status(500).json({ success: false, error: error.message });
   }
 });
 
-// ==================== HEALTH ENDPOINT ====================
-
-/**
- * @route   GET /api/health
- * @desc    Health check with ENHANCED status + screenshots
- */
 app.get('/api/health', (req, res) => {
   res.json({
     status: 'ok',
-    message: 'TimeDoctor API Server with STATUS + SCREENSHOTS + FIXED Usernames',
+    message: 'TimeDoctor API Server with VIEWABLE SCREENSHOTS',
     timestamp: new Date().toISOString(),
-    enhancements: {
-      userStatus: 'NEW - Gets online/offline and working status for each user',
-      individualScreenshots: 'NEW - Gets individual screenshots with productivity scores',
-      fixedUsernames: 'Gets real names like "Levi Daniels", "Joshua Banks"',
-      oneCallWebhook: 'ALL users sent in ONE JSON payload to n8n',
-      completeActivityData: 'Full activities, screenshots, timeUsage, disconnections arrays'
-    },
     newFeatures: {
-      onlineOfflineStatus: 'Each user shows online/offline status',
-      workingStatus: 'Detects if user is currently working, recently worked, or not working',
-      enhancedScreenshots: 'Individual screenshots with productivity scores and timing analysis',
-      statusTracking: 'Tracks last seen time and activity recency'
+      viewableScreenshots: 'NEW - Clickable URLs to view actual screenshot images',
+      multipleViewingOptions: 'View, download, proxy options for each screenshot',
+      screenshotServer: 'Built-in server to serve screenshots with metadata',
+      directImageAccess: 'No more broken links - direct access to images'
     },
+    screenshotEndpoints: [
+      'GET /api/screenshot/view/{screenshotId}?userId={userId} - View screenshot in HTML',
+      'GET /api/screenshot/proxy/{screenshotId}?userId={userId} - Direct image',
+      'GET /api/screenshot/download/{screenshotId}?userId={userId} - Download image',
+      'GET /api/user/{userId}/screenshots - List all user screenshots'
+    ],
     testEndpoints: [
-      'GET /api/debug/userStatus/{userId} - Test online/offline status detection',
-      'GET /api/debug/userScreenshots/{userId} - Test individual screenshots',
-      'GET /api/debug/fixedUserLookup/{userId} - Test name lookup',
-      'GET /api/debug/allUsers - See all users with status preview',
-      'POST /api/sync/now - Manual sync with STATUS + SCREENSHOTS'
+      'GET /api/debug/userScreenshots/{userId} - Test viewable screenshots',
+      'GET /api/debug/allUsers - See all users with screenshot URLs',
+      'POST /api/sync/now - Manual sync with viewable screenshots'
     ],
     webhookConfig: {
       url: N8N_WEBHOOK_URL,
-      sendOnce: SEND_ONCE_ON_STARTUP,
-      sendRecurring: SEND_RECURRING,
-      method: 'ONE CALL - All users with STATUS + SCREENSHOTS + activity data'
+      includes: 'STATUS + VIEWABLE SCREENSHOTS + complete activity data'
     }
   });
 });
@@ -827,12 +853,11 @@ app.use((req, res) => {
     success: false,
     error: 'Endpoint not found',
     availableEndpoints: [
-      'GET /api/health - Server health with ENHANCED features',
-      'GET /api/debug/userStatus/:userId - Test user online/offline status',
-      'GET /api/debug/userScreenshots/:userId - Test user screenshots',
-      'GET /api/debug/fixedUserLookup/:userId - Test FIXED user lookup',
-      'GET /api/debug/allUsers - See all users with status preview',
-      'POST /api/sync/now - Manually trigger ENHANCED sync'
+      'GET /api/health - Server health with screenshot features',
+      'GET /api/screenshot/view/{screenshotId}?userId={userId} - View screenshot',
+      'GET /api/user/{userId}/screenshots - List user screenshots',
+      'GET /api/debug/userScreenshots/{userId} - Test screenshots',
+      'POST /api/sync/now - Manual sync with viewable screenshots'
     ]
   });
 });
@@ -840,57 +865,54 @@ app.use((req, res) => {
 // Global error handler
 app.use((err, req, res, next) => {
   console.error('❌ Error:', err.stack);
-  res.status(500).json({
-    success: false,
-    error: 'Internal server error',
-    message: err.message
-  });
+  res.status(500).json({ success: false, error: 'Internal server error', message: err.message });
 });
 
 // ==================== START SERVER ====================
 
 app.listen(PORT, () => {
-  console.log('\n🚀 TimeDoctor API Server - ENHANCED with STATUS + SCREENSHOTS');
-  console.log('================================================================');
+  console.log('\n🚀 TimeDoctor API Server - ENHANCED with VIEWABLE SCREENSHOTS');
+  console.log('==============================================================');
   console.log(`📡 Server: http://localhost:${PORT}`);
   console.log(`📧 Email: ${config.credentials.email}`);
   console.log(`🏢 Company: ${config.credentials.companyName}`);
-  console.log('\n🔥 NEW ENHANCED FEATURES:');
-  console.log('========================');
-  console.log('🎯 1. ONLINE/OFFLINE Status - Know who is online right now');
-  console.log('🎯 2. WORKING Status - Detect currently working vs not working');
-  console.log('🎯 3. Individual Screenshots - Get all screenshots with productivity scores');
-  console.log('🎯 4. Enhanced User Data - Complete user profiles with status');
-  console.log('🎯 5. Real Names - Fixed usernames like "Levi Daniels", "Joshua Banks"');
+  console.log('\n🔥 NEW SCREENSHOT FEATURES:');
+  console.log('==========================');
+  console.log('🎯 1. VIEWABLE SCREENSHOTS - Click URLs to see actual images');
+  console.log('🎯 2. Multiple Viewing Options - View, download, proxy each screenshot');
+  console.log('🎯 3. Screenshot Server - Built-in server with HTML previews');
+  console.log('🎯 4. Direct Image Access - No more broken screenshot links');
+  console.log('🎯 5. Productivity Analysis - Scores and metadata for each image');
+  console.log('\n📸 SCREENSHOT ENDPOINTS:');
+  console.log('=======================');
+  console.log(`1. View screenshot: GET  /api/screenshot/view/{screenshotId}?userId={userId}`);
+  console.log(`2. Direct image: GET  /api/screenshot/proxy/{screenshotId}?userId={userId}`);
+  console.log(`3. Download image: GET  /api/screenshot/download/{screenshotId}?userId={userId}`);
+  console.log(`4. List screenshots: GET  /api/user/{userId}/screenshots`);
   console.log('\n🔍 TEST THE NEW FEATURES:');
   console.log('========================');
-  console.log('1. Test user status: GET  /api/debug/userStatus/{userId}');
-  console.log('2. Test screenshots: GET  /api/debug/userScreenshots/{userId}');
-  console.log('3. Check all users: GET  /api/debug/allUsers');  
-  console.log('4. Manual sync: POST /api/sync/now');
-  console.log('\n🎉 ENHANCED WEBHOOK INCLUDES:');
+  console.log('1. Test screenshots: GET  /api/debug/userScreenshots/{userId}');
+  console.log('2. Check all users: GET  /api/debug/allUsers');  
+  console.log('3. Manual sync: POST /api/sync/now');
+  console.log('\n🎉 YOUR N8N WILL NOW RECEIVE:');
   console.log('============================');
   console.log(`✅ Real employee names (Alice Hale, Levi Daniels, etc.)`);
   console.log(`✅ Online/Offline status for each user`);
-  console.log(`✅ Working/Not Working status`);
-  console.log(`✅ Individual screenshots with scores`);
+  console.log(`✅ CLICKABLE screenshot URLs you can view directly`);
+  console.log(`✅ Multiple ways to access each screenshot`);
   console.log(`✅ Complete activity data arrays`);
-  console.log(`✅ Productivity analysis per user`);
-  console.log(`✅ Last seen timestamps`);
+  console.log(`✅ Productivity scores per screenshot`);
   
-  // 🚀 ENHANCED: Send data ONCE on startup with STATUS + SCREENSHOTS
   if (SEND_ONCE_ON_STARTUP) {
     setTimeout(() => {
-      console.log('\n🚀 [STARTUP] Running ENHANCED sync with STATUS + SCREENSHOTS...');
-      console.log('🎯 This includes online/offline status and individual screenshots!');
+      console.log('\n🚀 [STARTUP] Running sync with VIEWABLE SCREENSHOTS...');
+      console.log('📸 This includes clickable URLs to view actual screenshots!');
       syncAllUsersToN8N_OneCall();
-    }, 10000); // Wait 10 seconds for server to fully start
-  } else {
-    console.log('\n⏸️ One-time sync disabled. Use POST /api/sync/now to manually trigger');
+    }, 10000);
   }
   
-  console.log('\n🎯 Server ready! STATUS + SCREENSHOTS + complete data coming up!');
-  console.log('🎉 Your n8n will show online/offline status and individual screenshots!');
+  console.log('\n🎯 Server ready! VIEWABLE SCREENSHOTS + complete data coming up!');
+  console.log('🎉 Your n8n will have clickable screenshot URLs!');
 });
 
 module.exports = app;
